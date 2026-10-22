@@ -9,7 +9,8 @@ The spec and the release 1 plan live as Claude Docs in the claude.ai project "à¸
 
 ## Rules for code
 - All user-facing text lives in `src/i18n/th.ts` and is read with `t("key")`. Never write Thai in other source files; ESLint fails the build if you do.
-- `src/core/` must not touch the DOM or Canvas, so it stays testable with Vitest alone.
+- `src/core/` must not touch the DOM or Canvas, so it stays testable with Vitest alone. `npm run typecheck` checks it against a DOM-free tsconfig (`tsconfig.core.json`), and Vitest fails if core coverage drops below 90%.
+- Work data is plain JSON (see `src/core/types.ts`). Anything read from storage or a backup goes through `validateDoc` first.
 - Keep the strict CSP working: no inline scripts or styles, no external hosts. Fonts are self-hosted via `@fontsource/*`.
 - Do not use `element.setAttribute("style", â€¦)` (blocked by the CSP); set `element.style.x` instead.
 - Pin dependency versions exactly; GitHub Actions are pinned to commit SHAs.
