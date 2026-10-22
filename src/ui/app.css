@@ -170,6 +170,8 @@ body.app .bopt[aria-checked="true"] { background: var(--sel); border-color: var(
 
 /* settings */
 .seg { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+/* long words (other languages) wrap inside the button instead of spilling out */
+body.app .seg button { height: auto; min-height: 44px; padding: 4px 8px; white-space: normal; text-align: center; overflow-wrap: anywhere; }
 body.app .seg [aria-checked="true"] { background: var(--sel); border-color: var(--ink-red); }
 body.app .seg .seg-bright { font-family: "Mali", sans-serif; }
 body.app .seg .seg-brush { font-family: "Sriracha", sans-serif; }

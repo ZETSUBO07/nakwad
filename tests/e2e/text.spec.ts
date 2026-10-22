@@ -44,6 +44,7 @@ test("type a text: it gets its own layer, named after it; empty boxes make nothi
   expect(await names(page)).toEqual([th.layerDefaultName.replace("{n}", "1")]);
 
   await tapPaper(page, 0.3, 0.4);
+  await expect(box(page)).toBeFocused();
   await page.keyboard.type("สวัสดี Hello");
   await panel(page).locator('[data-action="text-done"]').click();
   await expect(box(page)).toHaveCount(0);

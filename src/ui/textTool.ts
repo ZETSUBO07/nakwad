@@ -101,7 +101,9 @@ export class TextSession {
     this.sync();
     this.place();
     void ensureFont(data.font).then(() => this.place());
-    requestAnimationFrame(() => this.area.focus({ preventScroll: true }));
+    // focus at once, so the first letters typed are not lost (and again next frame, in case the tap moved it)
+    this.area.focus({ preventScroll: true });
+    requestAnimationFrame(() => { if (!this.done) this.area.focus({ preventScroll: true }); });
   }
 
   get open(): boolean { return !this.done; }
