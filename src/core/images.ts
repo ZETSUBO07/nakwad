@@ -36,3 +36,21 @@ export function imagesInUse(doc: WorkDoc): Set<string> {
   }
   return out;
 }
+
+function fontsFromEntry(e: Entry, out: Set<string>): void {
+  if (e.kind === "text") out.add(e.font);
+  else if (e.kind === "group") for (const x of e.items) fontsFromEntry(x, out);
+}
+
+/** Every font name used by text in a work (including undo/redo steps), so backups can carry imported fonts. */
+export function fontsInUse(doc: WorkDoc): Set<string> {
+  const out = new Set<string>();
+  for (const p of doc.pages) {
+    for (const L of Object.values(p.base.layers)) for (const e of L) fontsFromEntry(e, out);
+    for (const a of [...p.actions, ...p.redo]) {
+      if (a.type === "add" && a.text) out.add(a.text.font);
+      else if (a.type === "textset" && a.text) out.add(a.text.font);
+    }
+  }
+  return out;
+}
