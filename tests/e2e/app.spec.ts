@@ -195,6 +195,12 @@ test("longer translated text still fits (pseudo language, every text 40% longer)
   await page.locator('[data-action="settings"]').click();
   expect(await cut()).toEqual([]);
   await page.keyboard.press("Escape");
+  await page.getByTestId("toolbar").locator('[data-action="text"]').click();
+  const r = (await page.getByTestId("paper").boundingBox())!;
+  await page.mouse.click(r.x + r.width * 0.7, r.y + r.height * 0.5);
+  await expect(page.getByTestId("text-panel")).toBeVisible();
+  expect(await cut()).toEqual([]);
+  await page.keyboard.press("Escape");
   await page.locator('[data-action="gallery"]').click();
   await page.locator('[data-action="new-work"]').click();
   expect(await cut()).toEqual([]);

@@ -31,7 +31,10 @@ export interface Prefs {
   toolbar: { land?: TbState; port?: TbState };
   /** layer panel open; null = decide by screen width */
   layersOpen: boolean | null;
+  /** last text settings, used for the next text box */
+  text: { font: string; size: number; align: "left" | "center" | "right" };
 }
+export const TEXT_SIZE_MIN = 8, TEXT_SIZE_MAX = 600;
 
 /** Starting size (paper pixels) and strength (%) of each brush, as tried in the prototype. */
 export const BRUSH_DEFAULTS: Record<BrushId, BrushSetting> = {
@@ -57,6 +60,7 @@ export function defaultPrefs(): Prefs {
   return {
     lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: 20, font: "bright",
     brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null,
+    text: { font: "Anuphan", size: 72, align: "left" },
   };
 }
 
@@ -89,6 +93,12 @@ export function parsePrefs(raw: string | null): Prefs {
     }
   }
   if (typeof v.layersOpen === "boolean") out.layersOpen = v.layersOpen;
+  if (isObj(v.text)) {
+    const tx = v.text;
+    if (typeof tx.font === "string" && tx.font.length > 0 && tx.font.length <= 120) out.text.font = tx.font;
+    out.text.size = clampInt(tx.size, TEXT_SIZE_MIN, TEXT_SIZE_MAX, out.text.size);
+    if (tx.align === "left" || tx.align === "center" || tx.align === "right") out.text.align = tx.align;
+  }
   if (isObj(v.toolbar)) {
     if (isTbState(v.toolbar.land)) out.toolbar.land = v.toolbar.land;
     if (isTbState(v.toolbar.port)) out.toolbar.port = v.toolbar.port;

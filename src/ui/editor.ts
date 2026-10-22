@@ -1,11 +1,13 @@
-import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, layersFor, nextId, redo, replaceLast, undo, validActive, type Action, type LayerId, type LayerProps, type Page, type Point, type StrokeEntry, type WorkDoc } from "../core";
+import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, layersFor, nextId, redo, replaceLast, undo, validActive, type Action, type LayerId, type LayerProps, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
-import { PageRenderer, fitScale, onCanvasRestored, targetDpr } from "../render";
+import { PageRenderer, drawText, fitScale, hitText, makeCanvas, ctx2d, onCanvasRestored, targetDpr } from "../render";
 import { AutoSaver, StorageError, acquireWorkLock, requestPersistence, type SaveStatus, type Store, type WorkMeta } from "../storage";
 import type { Area } from "./dock";
 import { button, h } from "./dom";
+import { ensureFont, ensureFonts, loadImportedFonts } from "./fonts";
 import { LayersPanel } from "./layers";
+import { TextSession, type TextTarget } from "./textTool";
 import { applyPrefsToPage, remember, type Prefs } from "./prefs";
 import { openSettings } from "./settings";
 import { toast } from "./toast";
@@ -65,6 +67,10 @@ export class Editor {
   /** the layer whose colour is being dragged in the colour wheel (one undo step for the drag) */
   private bgLive: LayerId | null = null;
   private panelOpen = false;
+  private mode: "draw" | "text" = "draw";
+  private text: TextSession | null = null;
+  /** pictures made in this session (text turned into a picture) that are not saved yet */
+  private readonly pendingImages = new Map<string, Blob>();
   private readonly renderer: PageRenderer;
   private readonly saver: AutoSaver;
   private readonly input: InputController;
@@ -105,7 +111,9 @@ export class Editor {
       clear: () => this.clearLayer(this.page.active),
       area: () => this.area(),
       insetChanged: () => this.applyInset(),
-      toolChanged: () => this.ring.hidden = true,
+      toolChanged: () => { this.ring.hidden = true; if (this.text?.open) this.text.setColor(this.prefs.color); },
+      toggleText: () => this.setMode(this.mode === "text" ? "draw" : "text"),
+      textMode: () => this.mode === "text",
       sizePreview: (show) => this.sizePreview(show),
     });
     this.work = h("div", { class: "work" }, this.desk, this.zoomBtn, this.toolbar.el);
@@ -163,11 +171,12 @@ export class Editor {
     ro2.observe(this.work);
     this.cleanups.push(() => ro2.disconnect());
     this.cleanups.push(onCanvasRestored(this.canvas, () => { this.renderer.rebuild(); this.draw(); }));
+    void this.loadFonts();
   }
 
   private readonly onKey = (e: KeyboardEvent) => {
     const target = e.target as HTMLElement | null;
-    if (target?.closest("dialog") || (target instanceof HTMLInputElement && target.type !== "range")) return;
+    if (target?.closest("dialog, textarea") || (target instanceof HTMLInputElement && target.type !== "range")) return;
     const k = e.key.toLowerCase();
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       if (k === "z") { e.preventDefault(); this.history(e.shiftKey ? redo : undo); }
@@ -176,7 +185,8 @@ export class Editor {
     }
     if (e.altKey || e.metaKey) return;
     // 1–8 pick a brush (7 and 8 are the two erasers), [ and ] change the size
-    if (/^[1-8]$/.test(k)) { const b = BRUSHES[Number(k) - 1]; if (b) this.toolbar.setBrush(b); }
+    if (/^[1-8]$/.test(k)) { const b = BRUSHES[Number(k) - 1]; if (b) { this.setMode("draw"); this.toolbar.setBrush(b); } }
+    else if (k === "t") this.setMode(this.mode === "text" ? "draw" : "text");
     else if (k === "[" || k === "]") this.toolbar.sizeBy(k === "]" ? 2 : -2);
   };
 
@@ -235,7 +245,7 @@ export class Editor {
 
   /** Sharpness follows the zoom: re-render the layers when the needed resolution changed. */
   private resolution(force: boolean): void {
-    const s = derive(this.page);
+    const s = this.shown();
     const dpr = targetDpr(this.fit, this.view.s, window.devicePixelRatio || 1, s.w, s.h);
     if (!force && Math.abs(dpr - this.renderer.resolution) / this.renderer.resolution < 0.05) return;
     this.renderer.setState(s, this.doc.layers, dpr);
@@ -252,6 +262,7 @@ export class Editor {
   private setView(v: View, settled: boolean): void {
     this.view = v;
     this.place();
+    this.text?.place();
     if (settled) { this.resolution(false); this.draw(); }
   }
 
@@ -293,6 +304,7 @@ export class Editor {
   private strokeStart(p: Point, pressure: boolean): void {
     this.toolbar.closeMenu();
     this.panel.closeMenu();
+    if (this.mode === "text") { this.textTap(p); return; }
     if (!this.canChange(this.page.active, true)) return;
     const tool = this.toolbar.tool;
     this.stab = new Stabilizer(this.prefs.stab);
@@ -329,6 +341,115 @@ export class Editor {
     this.saver.markDirty();
   }
 
+  // ---------- text ----------
+
+  /** The page as shown: while a text is being edited it is left out (the typing box stands in for it). */
+  private shown(): PageState {
+    const s = derive(this.page), tgt = this.text?.open ? this.text.target : null;
+    if (tgt && s.layers[tgt.layer]) s.layers[tgt.layer] = (s.layers[tgt.layer] ?? []).filter((e) => !(e.kind === "text" && e.tid === tgt.tid));
+    return s;
+  }
+
+  /** Fonts used in this work (and imported ones) become ready; then text is drawn again in them. */
+  private async loadFonts(): Promise<void> {
+    await loadImportedFonts(this.store);
+    await ensureFonts(fontsInUse(this.doc));
+    if (!this.closing) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); this.panel.thumbs(); }
+  }
+
+  private setMode(m: "draw" | "text"): void {
+    if (m === this.mode) return;
+    if (m === "draw") this.text?.finish();
+    this.mode = m;
+    this.desk.classList.toggle("texting", m === "text");
+    this.ring.hidden = true;
+    if (m === "text") toast(t("textHint"));
+    this.toolbar.sync();
+  }
+
+  /** A tap with the text tool: edit the text under it, or start a new box there. */
+  private textTap(p: Point): void {
+    this.text?.finish();
+    const s = derive(this.page);
+    for (const id of [...s.order].reverse()) {
+      if (this.doc.layers[id]?.visible === false) continue;
+      const hit = (s.layers[id] ?? []).find((e) => e.kind === "text" && hitText(e, p[0], p[1]));
+      if (hit?.kind !== "text") continue;
+      if (this.doc.layers[id]?.locked) { toast(t("layerIsLocked", { name: this.doc.layers[id]?.name ?? id })); return; }
+      const { tid, x, y, text, font, size, color, align, rot } = hit;
+      this.openText({ tid, x, y, text, font, size, color, align, rot }, { layer: id, tid });
+      return;
+    }
+    const pt = this.prefs.text;
+    const tid = `T${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+    this.openText({ tid, x: p[0], y: p[1] - pt.size * 0.7, text: "", font: pt.font, size: pt.size, color: this.prefs.color, align: pt.align, rot: 0 }, null);
+  }
+
+  private openText(data: TextData, target: TextTarget | null): void {
+    this.text = new TextSession({
+      prefs: this.prefs,
+      savePrefs: () => this.env.savePrefs(),
+      store: this.store,
+      frame: () => this.frame(),
+      view: () => this.view,
+      container: () => this.work,
+      insets: () => this.toolbar.insets,
+      finish: (d, tg) => { this.saveText(d, tg); },
+      remove: (tg) => { this.text = null; if (tg) this.act({ type: "textset", layer: tg.layer, tid: tg.tid, text: null }); else this.refresh(); },
+      flatten: (d, tg) => void this.flattenText(d, tg),
+    }, data, target);
+    // hide the original while it is being edited
+    if (target) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); }
+  }
+
+  /** One undo step: a new text layer, or the changed (or emptied) text. */
+  private saveText(d: TextData, tg: TextTarget | null): TextTarget | null {
+    this.text = null;
+    // committed straight away (undo and closing come right after); drawn again once its font is in
+    void ensureFont(d.font).then((ok) => { if (ok && !this.closing) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); this.panel.thumbs(); } });
+    const empty = !d.text.trim();
+    if (!tg) {
+      if (empty) { this.refresh(); return null; }
+      const s = derive(this.page);
+      if (s.order.length >= this.maxLayers()) { toast(t("layerFull", { n: this.maxLayers() })); this.refresh(); return null; }
+      const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers } };
+      const id = nextId(doc, "layer");
+      const first = d.text.trim().split("\n")[0]?.slice(0, 40) || t("textLayerName");
+      doc.layers[id] = { name: first, visible: true, opacity: 1 };
+      this.doc = doc;
+      const at = s.order.indexOf(this.page.active) + 1;
+      this.setPage({ ...commit(this.page, { type: "add", id, index: at, text: d }), active: id });
+      this.refresh();
+      return { layer: id, tid: d.tid };
+    }
+    const before = (derive(this.page).layers[tg.layer] ?? []).find((e) => e.kind === "text" && e.tid === tg.tid);
+    const same = before?.kind === "text" && (["x", "y", "text", "font", "size", "color", "align", "rot"] as const).every((k) => before[k] === d[k]);
+    if (same) { this.refresh(); return tg; }
+    this.act({ type: "textset", layer: tg.layer, tid: tg.tid, text: empty ? null : d });
+    return empty ? null : tg;
+  }
+
+  /** Save the text, then turn it into a picture of the whole page size (one more undo step). */
+  private async flattenText(d: TextData, tg: TextTarget | null): Promise<void> {
+    const saved = this.saveText(d, tg);
+    if (!saved) return;
+    try {
+      const s = derive(this.page);
+      const c = makeCanvas(s.w, s.h);
+      drawText(ctx2d(c), d, { dpr: 1, w: s.w, h: s.h, image: () => undefined });
+      const blob = await c.convertToBlob({ type: "image/png" });
+      const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next } };
+      const img = nextId(doc, "image");
+      this.doc = doc;
+      this.images.set(img, await createImageBitmap(blob));
+      this.pendingImages.set(img, blob);
+      this.act({ type: "textflat", layer: saved.layer, tid: saved.tid, img, w: s.w, h: s.h });
+    } catch (err) {
+      console.error(err);
+      toast(t("actionFailed"));
+    }
+  }
+
   // ---------- layers ----------
 
   private maxLayers(): number {
@@ -356,7 +477,7 @@ export class Editor {
   private refresh(): void {
     const s = derive(this.page), active = validActive(s, this.page.active);
     if (active && active !== this.page.active) this.setPage({ ...this.page, active });
-    this.renderer.setState(s, this.doc.layers);
+    this.renderer.setState(this.shown(), this.doc.layers);
     this.draw();
     this.panel.update();
     this.saver.markDirty();
@@ -455,6 +576,7 @@ export class Editor {
 
   private history(step: (p: Page) => Page): void {
     if (this.live) return;
+    this.text?.finish();
     const next = step(this.page);
     if (next === this.page) return;
     this.bgLive = null;
@@ -473,7 +595,9 @@ export class Editor {
     const now = Date.now();
     const thumb = now - this.lastThumb >= THUMB_EVERY_MS ? await this.thumb() : undefined;
     if (thumb) this.lastThumb = now;
-    this.meta = await this.store.saveWork(this.meta.id, { doc: this.doc, now, ...(thumb ? { thumb } : {}) });
+    const newImages = new Map(this.pendingImages);
+    this.meta = await this.store.saveWork(this.meta.id, { doc: this.doc, now, newImages, ...(thumb ? { thumb } : {}) });
+    for (const id of newImages.keys()) this.pendingImages.delete(id);
     // spec: ask the browser to keep our data after the first successful save
     if (!this.askedPersist) { this.askedPersist = true; void requestPersistence(); }
   }
@@ -490,6 +614,7 @@ export class Editor {
     if (this.closing) return;
     this.closing = true;
     this.live = null;
+    this.text?.finish();
     await this.saver.flush();
     this.lastThumb = 0;
     this.saver.markDirty();
