@@ -31,6 +31,12 @@ export const th = {
   labLayerColor: "สีพื้นเลเยอร์",
   labSize: "ขนาด",
   labFrameTime: "วาดหนึ่งเฟรม {ms} มิลลิวินาที",
+  // M5: pen and fingers
+  labGestures: "สองนิ้ว: เลื่อน ซูม หมุน · แตะสองนิ้ว: ย้อนกลับ · แตะสามนิ้ว: ทำซ้ำ · หนีบนิ้วเข้าเร็ว ๆ: พอดีจอ",
+  labFingerDraw: "นิ้ววาดได้",
+  labStabilizer: "กันมือสั่น",
+  labZoom: "{n}%",
+  labFit: "พอดีจอ",
 } as const;
 
 export type MessageKey = keyof typeof th;

@@ -86,9 +86,10 @@ export interface LabTestApi {
   wipe(): void;
 }
 
-export function exposeScenes(canvas: HTMLCanvasElement, out: CanvasRenderingContext2D, pauseLab: () => void): void {
+export function exposeScenes(canvas: HTMLCanvasElement, out: CanvasRenderingContext2D, pauseLab: () => void, extra: object = {}): void {
   let current: { renderer: PageRenderer; paper: string } | null = null;
   const api: LabTestApi = {
+    ...extra,
     async scene(name) {
       const make = SCENES[name];
       if (!make) throw new Error(`no scene ${name}`);
