@@ -1,11 +1,12 @@
-import { BRUSHES, canRedo, canUndo, commit, derive, redo, undo, type Page, type Point, type StrokeEntry, type WorkDoc } from "../core";
+import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, layersFor, nextId, redo, replaceLast, undo, validActive, type Action, type LayerId, type LayerProps, type Page, type Point, type StrokeEntry, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
 import { PageRenderer, fitScale, onCanvasRestored, targetDpr } from "../render";
 import { AutoSaver, StorageError, acquireWorkLock, requestPersistence, type SaveStatus, type Store, type WorkMeta } from "../storage";
 import type { Area } from "./dock";
 import { button, h } from "./dom";
-import { applyPrefsToPage, type Prefs } from "./prefs";
+import { LayersPanel } from "./layers";
+import { applyPrefsToPage, remember, type Prefs } from "./prefs";
 import { openSettings } from "./settings";
 import { toast } from "./toast";
 import { Toolbar } from "./toolbar";
@@ -59,6 +60,11 @@ export class Editor {
   private readonly pill: HTMLElement;
   private readonly zoomBtn: HTMLButtonElement;
   private readonly toolbar: Toolbar;
+  private readonly panel: LayersPanel;
+  private readonly layersBtn: HTMLButtonElement;
+  /** the layer whose colour is being dragged in the colour wheel (one undo step for the drag) */
+  private bgLive: LayerId | null = null;
+  private panelOpen = false;
   private readonly renderer: PageRenderer;
   private readonly saver: AutoSaver;
   private readonly input: InputController;
@@ -96,18 +102,42 @@ export class Editor {
       savePrefs: () => env.savePrefs(),
       undo: () => this.history(undo),
       redo: () => this.history(redo),
-      clear: () => this.clearLayer(),
+      clear: () => this.clearLayer(this.page.active),
       area: () => this.area(),
       insetChanged: () => this.applyInset(),
       toolChanged: () => this.ring.hidden = true,
       sizePreview: (show) => this.sizePreview(show),
     });
     this.work = h("div", { class: "work" }, this.desk, this.zoomBtn, this.toolbar.el);
+    this.panel = new LayersPanel({
+      state: () => derive(this.page),
+      props: () => this.doc.layers,
+      active: () => this.page.active,
+      maxLayers: () => this.maxLayers(),
+      layerCanvas: (id) => this.renderer.layerCanvas(id),
+      area: () => this.area(),
+      recentColors: () => this.prefs.paperRecent,
+      select: (id) => this.select(id),
+      add: () => this.addLayer(),
+      duplicate: (id) => this.addLayer(id),
+      remove: (id) => this.removeLayer(id),
+      merge: (id) => this.mergeDown(id),
+      move: (id, to) => this.act({ type: "move", id, to }),
+      clear: (id) => this.clearLayer(id),
+      bg: (id, color, final) => this.layerColor(id, color, final),
+      setProps: (id, patch, final) => this.setLayerProps(id, patch, final),
+      exportLayer: (id) => void this.exportLayer(id),
+    });
+    this.panel.el.addEventListener("closepanel", () => this.showPanel(false));
+    this.layersBtn = button({ icon: "layers", label: t("layers"), class: "bar-btn", data: { action: "layers" }, onClick: () => this.showPanel(!this.panelOpen) });
+    this.layersBtn.title = t("layersToggle");
+    const workspace = h("div", { class: "workspace" }, this.panel.el, this.work);
     this.pill = h("span", { class: "save-pill", attrs: { role: "status" }, data: { testid: "save" } });
     const back = button({ icon: "gallery", label: t("gallery"), class: "bar-btn", data: { action: "gallery" }, onClick: () => void this.close() });
     const settings = button({ icon: "settings", title: t("settings"), class: "icon-btn", data: { action: "settings" }, onClick: () => this.settings() });
-    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), settings);
-    this.el = h("div", { class: "editor" }, bar, this.work);
+    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), this.layersBtn, settings);
+    this.el = h("div", { class: "editor" }, bar, workspace);
+    this.showPanel(this.prefs.layersOpen ?? window.innerWidth >= 900, false);
 
     this.saver = new AutoSaver({ save: () => this.save(), onStatus: (s, e) => this.showStatus(s, e) });
     this.showStatus("saved");
@@ -262,6 +292,8 @@ export class Editor {
 
   private strokeStart(p: Point, pressure: boolean): void {
     this.toolbar.closeMenu();
+    this.panel.closeMenu();
+    if (!this.canChange(this.page.active, true)) return;
     const tool = this.toolbar.tool;
     this.stab = new Stabilizer(this.prefs.stab);
     this.renderer.prepareStroke(this.page.active);
@@ -293,27 +325,141 @@ export class Editor {
     this.setPage(commit(this.page, { type: "draw", layer, entry }));
     this.renderer.applyDraw(derive(this.page), layer, entry);
     this.draw();
+    this.panel.thumbs();
     this.saver.markDirty();
   }
 
-  private clearLayer(): void {
+  // ---------- layers ----------
+
+  private maxLayers(): number {
+    const s = derive(this.page);
+    return Math.max(1, layersFor(s.w, s.h));
+  }
+
+  /** Strokes and clearing need a layer that is shown and not locked; say why not otherwise. */
+  private canChange(id: LayerId, drawing: boolean): boolean {
+    const why = drawBlock(derive(this.page), this.doc.layers, id);
+    const name = this.doc.layers[id]?.name ?? id;
+    if (why === "locked") { toast(t("layerIsLocked", { name })); return false; }
+    if (why === "hidden" && drawing) { toast(t("layerIsHidden", { name })); return false; }
+    return why !== "missing";
+  }
+
+  /** Commit one change to the page (one undo step) and show it everywhere. */
+  private act(a: Action, replace = false): void {
     if (this.live) return;
-    const layer = this.page.active;
-    if (!(derive(this.page).layers[layer] ?? []).length) return;
-    this.setPage(commit(this.page, { type: "clear", layer }));
-    this.renderer.setState(derive(this.page), this.doc.layers);
+    this.setPage(replace ? replaceLast(this.page, a) : commit(this.page, a));
+    this.refresh();
+  }
+
+  /** After the page changed: keep a valid active layer, redraw, update the panel, save soon. */
+  private refresh(): void {
+    const s = derive(this.page), active = validActive(s, this.page.active);
+    if (active && active !== this.page.active) this.setPage({ ...this.page, active });
+    this.renderer.setState(s, this.doc.layers);
     this.draw();
+    this.panel.update();
     this.saver.markDirty();
+  }
+
+  private select(id: LayerId): void {
+    if (id === this.page.active) return;
+    this.setPage({ ...this.page, active: id });
+    this.panel.update();
+    this.saver.markDirty();
+  }
+
+  /** A new transparent layer above the active one, or a copy of `copyOf` above it. */
+  private addLayer(copyOf?: LayerId): void {
+    const s = derive(this.page);
+    if (s.order.length >= this.maxLayers()) { toast(t("layerFull", { n: this.maxLayers() })); return; }
+    const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers } };
+    const id = nextId(doc, "layer");
+    const from = copyOf ? doc.layers[copyOf] : undefined;
+    const props: LayerProps = from ? { ...from, name: t("layerCopyName", { name: from.name }), locked: false } : { name: t("layerDefaultName", { n: doc.next.layer }), visible: true, opacity: 1 };
+    doc.layers[id] = props;
+    this.doc = doc;
+    const at = s.order.indexOf(copyOf ?? this.page.active) + 1;
+    this.setPage({ ...commit(this.page, { type: "add", id, index: at, ...(copyOf ? { copyOf } : {}) }), active: id });
+    this.refresh();
+  }
+
+  private removeLayer(id: LayerId): void {
+    const s = derive(this.page), i = s.order.indexOf(id);
+    if (i < 0 || s.order.length <= 1 || this.doc.layers[id]?.locked) return;
+    // the layer below becomes active (or the one above when deleting the bottom layer)
+    const next = s.order[i - 1] ?? s.order[i + 1];
+    this.setPage(commit(this.page, { type: "del", id }));
+    if (id === this.page.active && next) this.setPage({ ...this.page, active: next });
+    this.refresh();
+  }
+
+  private mergeDown(id: LayerId): void {
+    const s = derive(this.page), i = s.order.indexOf(id), into = s.order[i - 1];
+    if (!into || this.doc.layers[id]?.locked || this.doc.layers[into]?.locked) return;
+    this.setPage({ ...commit(this.page, { type: "merge", id, into, alpha: this.doc.layers[id]?.opacity ?? 1 }), active: into });
+    this.refresh();
+  }
+
+  private clearLayer(id: LayerId): void {
+    if (this.live || !this.canChange(id, false)) return;
+    const L = derive(this.page).layers[id] ?? [];
+    if (!L.some((e) => e.kind !== "bg" || e.holes.length > 0)) return;
+    this.act({ type: "clear", layer: id });
+  }
+
+  private layerColor(id: LayerId, color: string | null, final: boolean): void {
+    this.act({ type: "bg", layer: id, color }, this.bgLive === id);
+    this.bgLive = final ? null : id;
+    if (final && color && color !== "#ffffff" && color !== "#fbf7ee") { this.prefs.paperRecent = remember(this.prefs.paperRecent, color); this.env.savePrefs(); }
+  }
+
+  /** Name, visibility, opacity and lock are settings, not undo steps. */
+  private setLayerProps(id: LayerId, patch: Partial<LayerProps>, final: boolean): void {
+    const cur = this.doc.layers[id];
+    if (!cur) return;
+    this.doc = { ...this.doc, layers: { ...this.doc.layers, [id]: { ...cur, ...patch } } };
+    this.renderer.setProps(this.doc.layers);
+    this.draw();
+    if (final) { this.panel.update(); this.saver.markDirty(); }
+  }
+
+  private async exportLayer(id: LayerId): Promise<void> {
+    try {
+      const s = derive(this.page), name = this.doc.layers[id]?.name ?? id;
+      // drawn again at the paper's full size, with only this layer showing
+      const r = new PageRenderer({ image: (key) => this.images.get(key) });
+      r.setState(s, Object.fromEntries(s.order.map((l) => [l, { name: l, visible: l === id, opacity: l === id ? (this.doc.layers[id]?.opacity ?? 1) : 0 }])), 1);
+      const blob = await r.flatten().convertToBlob({ type: "image/png" });
+      const url = URL.createObjectURL(blob);
+      const a = h("a", { attrs: { href: url, download: `${this.meta.name} - ${name}.png` } });
+      document.body.append(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (err) {
+      console.error(err);
+      toast(t("actionFailed"));
+    }
+  }
+
+  private showPanel(open: boolean, store = true): void {
+    this.panelOpen = open;
+    this.panel.el.hidden = !open;
+    this.layersBtn.setAttribute("aria-pressed", String(open));
+    if (open) this.panel.update();
+    if (store) { this.prefs.layersOpen = open; this.env.savePrefs(); }
+    // the paper area changed size
+    requestAnimationFrame(() => this.toolbar.place());
   }
 
   private history(step: (p: Page) => Page): void {
     if (this.live) return;
     const next = step(this.page);
     if (next === this.page) return;
+    this.bgLive = null;
     this.setPage(next);
-    this.renderer.setState(derive(this.page), this.doc.layers);
-    this.draw();
-    this.saver.markDirty();
+    this.refresh();
   }
 
   // ---------- saving ----------
@@ -356,6 +502,7 @@ export class Editor {
     }
     this.input.detach();
     this.toolbar.destroy();
+    this.panel.destroy();
     for (const c of this.cleanups) c();
     try {
       await this.store.closeWork(this.meta.id, this.doc, Date.now());

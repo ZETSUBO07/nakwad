@@ -25,10 +25,10 @@ test("icons and fonts load from the app itself", async ({ page }) => {
   const outside: string[] = [];
   page.on("request", (r) => { if (!r.url().startsWith("http://localhost:4173/")) outside.push(r.url()); });
   await page.goto("./");
-  await page.evaluate(() => document.fonts.ready);
-  const iconOk = await page.locator(".gicon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0);
-  expect(iconOk).toBe(true);
-  expect(await page.evaluate(() => document.fonts.check('600 32px "Mali"', "นักวาด"))).toBe(true);
+  // the gallery heading is drawn after the app starts; then its font must come from our own server
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => { await document.fonts.ready; return document.fonts.check('600 32px "Mali"', "นักวาด"); })).toBe(true);
+  await expect.poll(() => page.locator(".gicon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
   expect(outside).toEqual([]);
 });
 

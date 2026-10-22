@@ -29,6 +29,8 @@ export interface Prefs {
   brushes: Record<BrushId, BrushSetting>;
   /** toolbar place, kept apart for landscape and portrait */
   toolbar: { land?: TbState; port?: TbState };
+  /** layer panel open; null = decide by screen width */
+  layersOpen: boolean | null;
 }
 
 /** Starting size (paper pixels) and strength (%) of each brush, as tried in the prototype. */
@@ -52,7 +54,7 @@ const KEY = "nakwad.prefs";
 export function defaultPrefs(): Prefs {
   return {
     lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: 20, font: "bright",
-    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {},
+    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null,
   };
 }
 
@@ -84,6 +86,7 @@ export function parsePrefs(raw: string | null): Prefs {
       if (isObj(s)) out.brushes[b] = { size: clampInt(s.size, SIZE_MIN, SIZE_MAX, BRUSH_DEFAULTS[b].size), op: clampInt(s.op, OP_MIN, OP_MAX, BRUSH_DEFAULTS[b].op) };
     }
   }
+  if (typeof v.layersOpen === "boolean") out.layersOpen = v.layersOpen;
   if (isObj(v.toolbar)) {
     if (isTbState(v.toolbar.land)) out.toolbar.land = v.toolbar.land;
     if (isTbState(v.toolbar.port)) out.toolbar.port = v.toolbar.port;

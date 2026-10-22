@@ -142,6 +142,7 @@ test("settings: hand, fingers, font style, smoothing", async ({ page }) => {
 
 test("clear the layer, and undo it", async ({ page }) => {
   await newWork(page);
+  await toolbar(page).locator('[data-field="size"]').fill("24");
   await line(page);
   const px = await pixel(page, 0.4, 0.5);
   expect(px[0]!).toBeLessThan(100);
