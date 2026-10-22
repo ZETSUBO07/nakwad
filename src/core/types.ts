@@ -15,8 +15,13 @@ export type TextId = string;
 /** [x, y, pressure 0–1, time ms] in paper pixels. */
 export type Point = [number, number, number, number];
 
-/** Similarity transform used by move/scale: x' = s·x + dx, y' = s·y + dy. */
-export type Mat = [s: number, dx: number, dy: number];
+/**
+ * Similarity transform used by move, scale and rotate: a point is turned by r (radians, around
+ * the paper's top-left corner), scaled by s, then shifted:
+ *   x' = s·(cos r·x − sin r·y) + dx,   y' = s·(sin r·x + cos r·y) + dy
+ * r is optional (works saved before rotation existed have [s, dx, dy]).
+ */
+export type Mat = [s: number, dx: number, dy: number, r?: number];
 
 /** A selection outline in paper pixels; `inv` selects everything outside it. */
 export interface Mask {
@@ -131,6 +136,9 @@ export interface TextData {
   color: string;
   align: TextAlign;
   rot: number;
+  /** box size at the last edit (paper pixels): the pivot when the layer is turned with the move tool */
+  w?: number;
+  h?: number;
 }
 export interface TextEntry extends TextData {
   kind: "text";

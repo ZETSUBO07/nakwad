@@ -1,4 +1,4 @@
-import type { BgEntry, Entry, LineSetEntry, Mask, StrokeEntry, TextData } from "../core";
+import type { BgEntry, Entry, LineSetEntry, Mask, Mat, StrokeEntry, TextData } from "../core";
 import { strokeOnto } from "./brushes";
 import { ctx2d, makeCanvas, type Ctx } from "./canvas";
 
@@ -133,6 +133,12 @@ export function hitText(t: TextData, px: number, py: number): boolean {
   return Math.abs(dx) <= m.w / 2 + pad && Math.abs(dy) <= m.h / 2 + pad;
 }
 
+/** Set a context's transform to a move (paper pixels) at `dpr` device pixels per paper pixel. */
+export function setMove(x: Ctx, m: Mat, dpr: number): void {
+  const r = m[3] ?? 0, k = dpr * m[0], c = Math.cos(r) * k, n = Math.sin(r) * k;
+  x.setTransform(c, n, -n, c, dpr * m[1], dpr * m[2]);
+}
+
 // ---------- layer colour ----------
 
 /** A layer colour with its "erase everything" holes cut out. */
@@ -239,9 +245,15 @@ export function renderEntry(target: Ctx, e: Entry, env: RenderEnv): void {
         tmp.setTransform(k, 0, 0, k, 0, 0);
         renderList(tmp, e.items, { ...env, dpr: k, w: e.src[0], h: e.src[1] });
         target.save();
-        target.setTransform(1, 0, 0, 1, 0, 0);
         target.globalAlpha = e.opacity;
-        target.drawImage(tmp.canvas, Math.round(e.m[1] * env.dpr), Math.round(e.m[2] * env.dpr));
+        const r = e.m[3] ?? 0;
+        if (r) {
+          target.setTransform(Math.cos(r), Math.sin(r), -Math.sin(r), Math.cos(r), e.m[1] * env.dpr, e.m[2] * env.dpr);
+          target.drawImage(tmp.canvas, 0, 0);
+        } else {
+          target.setTransform(1, 0, 0, 1, 0, 0);
+          target.drawImage(tmp.canvas, Math.round(e.m[1] * env.dpr), Math.round(e.m[2] * env.dpr));
+        }
         target.restore();
         return;
       }
@@ -251,8 +263,8 @@ export function renderEntry(target: Ctx, e: Entry, env: RenderEnv): void {
       target.save();
       target.globalAlpha = e.opacity;
       if (e.m) {
-        // a moved layer: drawn again with the move applied (scale and offset)
-        target.setTransform(env.dpr * e.m[0], 0, 0, env.dpr * e.m[0], env.dpr * e.m[1], env.dpr * e.m[2]);
+        // a moved layer: drawn again with the move applied (scale, turn and offset)
+        setMove(target, e.m, env.dpr);
         target.drawImage(tmp.canvas, 0, 0, env.w, env.h);
       } else {
         target.setTransform(1, 0, 0, 1, 0, 0);

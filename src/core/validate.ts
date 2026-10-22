@@ -45,8 +45,9 @@ class Checker {
 }
 
 function mat(c: Checker, v: unknown, path: string): boolean {
-  if (!Array.isArray(v) || v.length !== 3 || !v.every(isCoord)) return c.fail(path, "expected [scale, dx, dy]");
+  if (!Array.isArray(v) || (v.length !== 3 && v.length !== 4) || !v.every(isCoord)) return c.fail(path, "expected [scale, dx, dy] or [scale, dx, dy, turn]");
   if (!((v[0] as number) > 0)) return c.fail(path, "scale must be positive");
+  if (v.length === 4 && Math.abs(v[3] as number) > Math.PI * 2) return c.fail(path, "turn out of range");
   return true;
 }
 
@@ -67,6 +68,7 @@ function text(c: Checker, v: unknown, path: string): boolean {
   if (!isHexColor(v.color)) return c.fail(path + ".color", "bad colour");
   if (v.align !== "left" && v.align !== "center" && v.align !== "right") return c.fail(path + ".align", "bad alignment");
   if (!isNum(v.rot) || Math.abs(v.rot) > 360) return c.fail(path + ".rot", "bad rotation");
+  if ((v.w !== undefined && (!isNum(v.w) || v.w < 0 || v.w > LIMITS.coordinate)) || (v.h !== undefined && (!isNum(v.h) || v.h < 0 || v.h > LIMITS.coordinate))) return c.fail(path, "bad box size");
   return true;
 }
 

@@ -1,13 +1,14 @@
-import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, layersFor, nextId, redo, replaceLast, undo, validActive, type Action, type LayerId, type LayerProps, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
+import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, invert, layersFor, mul, nextId, redo, replaceLast, undo, validActive, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
-import { PageRenderer, drawText, fitScale, hitText, makeCanvas, ctx2d, onCanvasRestored, targetDpr } from "../render";
+import { PageRenderer, drawText, fitScale, hitText, makeCanvas, ctx2d, measureText, onCanvasRestored, targetDpr } from "../render";
 import { AutoSaver, StorageError, acquireWorkLock, requestPersistence, type SaveStatus, type Store, type WorkMeta } from "../storage";
 import type { Area } from "./dock";
 import { button, h } from "./dom";
 import { ensureFont, ensureFonts, loadImportedFonts } from "./fonts";
 import { LayersPanel } from "./layers";
 import { TextSession, type TextTarget } from "./textTool";
+import { TransformFrame } from "./transform";
 import { applyPrefsToPage, remember, type Prefs } from "./prefs";
 import { openSettings } from "./settings";
 import { toast } from "./toast";
@@ -67,7 +68,10 @@ export class Editor {
   /** the layer whose colour is being dragged in the colour wheel (one undo step for the drag) */
   private bgLive: LayerId | null = null;
   private panelOpen = false;
-  private mode: "draw" | "text" = "draw";
+  private mode: "draw" | "text" | "move" = "draw";
+  /** the move / scale / turn frame: its layer, what has been kept so far, and the drag being shown */
+  private frameBox: { frame: TransformFrame; layer: LayerId; kept: Mat | null; live: Mat | null } | null = null;
+  private readonly fileIn: HTMLInputElement;
   private text: TextSession | null = null;
   /** pictures made in this session (text turned into a picture) that are not saved yet */
   private readonly pendingImages = new Map<string, Blob>();
@@ -114,6 +118,8 @@ export class Editor {
       toolChanged: () => { this.ring.hidden = true; if (this.text?.open) this.text.setColor(this.prefs.color); },
       toggleText: () => this.setMode(this.mode === "text" ? "draw" : "text"),
       textMode: () => this.mode === "text",
+      toggleMove: () => this.setMode(this.mode === "move" ? "draw" : "move"),
+      moveMode: () => this.mode === "move",
       sizePreview: (show) => this.sizePreview(show),
     });
     this.work = h("div", { class: "work" }, this.desk, this.zoomBtn, this.toolbar.el);
@@ -135,8 +141,11 @@ export class Editor {
       bg: (id, color, final) => this.layerColor(id, color, final),
       setProps: (id, patch, final) => this.setLayerProps(id, patch, final),
       exportLayer: (id) => void this.exportLayer(id),
+      importImage: () => this.fileIn.click(),
     });
     this.panel.el.addEventListener("closepanel", () => this.showPanel(false));
+    this.fileIn = h("input", { attrs: { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/bmp", hidden: "" }, data: { field: "image-file" } });
+    this.fileIn.addEventListener("change", () => { const f = this.fileIn.files?.[0]; this.fileIn.value = ""; if (f) void this.importImage(f); });
     this.layersBtn = button({ icon: "layers", label: t("layers"), class: "bar-btn", data: { action: "layers" }, onClick: () => this.showPanel(!this.panelOpen) });
     this.layersBtn.title = t("layersToggle");
     const workspace = h("div", { class: "workspace" }, this.panel.el, this.work);
@@ -144,7 +153,10 @@ export class Editor {
     const back = button({ icon: "gallery", label: t("gallery"), class: "bar-btn", data: { action: "gallery" }, onClick: () => void this.close() });
     const settings = button({ icon: "settings", title: t("settings"), class: "icon-btn", data: { action: "settings" }, onClick: () => this.settings() });
     const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), this.layersBtn, settings);
-    this.el = h("div", { class: "editor" }, bar, workspace);
+    this.el = h("div", { class: "editor" }, bar, workspace, this.fileIn);
+    // a picture dropped on the paper becomes a new layer
+    this.work.addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
+    this.work.addEventListener("drop", (e) => { const f = e.dataTransfer?.files[0]; if (f && f.type.startsWith("image/")) { e.preventDefault(); void this.importImage(f); } });
     this.showPanel(this.prefs.layersOpen ?? window.innerWidth >= 900, false);
 
     this.saver = new AutoSaver({ save: () => this.save(), onStatus: (s, e) => this.showStatus(s, e) });
@@ -187,6 +199,8 @@ export class Editor {
     // 1–8 pick a brush (7 and 8 are the two erasers), [ and ] change the size
     if (/^[1-8]$/.test(k)) { const b = BRUSHES[Number(k) - 1]; if (b) { this.setMode("draw"); this.toolbar.setBrush(b); } }
     else if (k === "t") this.setMode(this.mode === "text" ? "draw" : "text");
+    else if (k === "v") this.setMode(this.mode === "move" ? "draw" : "move");
+    else if ((k === "enter" || k === "escape") && this.mode === "move") this.setMode("draw");
     else if (k === "[" || k === "]") this.toolbar.sizeBy(k === "]" ? 2 : -2);
   };
 
@@ -263,12 +277,14 @@ export class Editor {
     this.view = v;
     this.place();
     this.text?.place();
+    this.frameBox?.frame.place();
     if (settled) { this.resolution(false); this.draw(); }
   }
 
   private draw(): void {
     const entry = this.live && this.predicted.length ? { ...this.live, points: [...this.live.points, ...this.predicted] } : this.live;
-    this.renderer.composite(this.out, this.doc.paper, entry ? { kind: "draw", layer: this.page.active, entry } : undefined);
+    const fb = this.frameBox;
+    this.renderer.composite(this.out, this.doc.paper, entry ? { kind: "draw", layer: this.page.active, entry } : fb?.live ? { kind: "move", layer: fb.layer, m: fb.live } : undefined);
     this.toolbar.undoBtn.disabled = !canUndo(this.page);
     this.toolbar.redoBtn.disabled = !canRedo(this.page);
   }
@@ -305,6 +321,7 @@ export class Editor {
     this.toolbar.closeMenu();
     this.panel.closeMenu();
     if (this.mode === "text") { this.textTap(p); return; }
+    if (this.mode === "move") return; // outside the frame: nothing to draw
     if (!this.canChange(this.page.active, true)) return;
     const tool = this.toolbar.tool;
     this.stab = new Stabilizer(this.prefs.stab);
@@ -357,14 +374,84 @@ export class Editor {
     if (!this.closing) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); this.panel.thumbs(); }
   }
 
-  private setMode(m: "draw" | "text"): void {
+  private setMode(m: "draw" | "text" | "move"): void {
     if (m === this.mode) return;
-    if (m === "draw") this.text?.finish();
+    this.text?.finish();
+    this.closeFrame();
     this.mode = m;
     this.desk.classList.toggle("texting", m === "text");
     this.ring.hidden = true;
     if (m === "text") toast(t("textHint"));
+    if (m === "move" && !this.openFrame()) this.mode = "draw";
     this.toolbar.sync();
+  }
+
+  // ---------- move, scale, turn ----------
+
+  /** Put the frame around the active layer's content. False when there is nothing to move. */
+  private openFrame(): boolean {
+    const layer = this.page.active, name = this.doc.layers[layer]?.name ?? layer;
+    if (!this.canChange(layer, false)) return false;
+    const box = this.renderer.contentBounds(layer);
+    if (!box) { toast(t("moveEmpty", { name })); return false; }
+    const frame = new TransformFrame({
+      frame: () => this.frame(),
+      view: () => this.view,
+      container: () => this.work,
+      preview: (m) => { if (this.frameBox) { this.frameBox.live = this.frameBox.kept ? mul(m, invert(this.frameBox.kept)) : m; this.redraw(); } },
+      commit: (m) => this.keepMove(m),
+      done: () => this.setMode("draw"),
+    }, box);
+    this.frameBox = { frame, layer, kept: null, live: null };
+    return true;
+  }
+
+  /** A drag in the frame ended: one undo step for the whole time the frame is open. */
+  private keepMove(m: Mat): void {
+    const fb = this.frameBox;
+    if (!fb) return;
+    const a: Action = { type: "xform", layer: fb.layer, m };
+    const last = this.page.actions[this.page.actions.length - 1];
+    // replace our own earlier step only if nothing else happened in between
+    this.setPage(fb.kept && last?.type === "xform" && last.layer === fb.layer ? replaceLast(this.page, a) : commit(this.page, a));
+    fb.kept = m;
+    fb.live = null;
+    this.refresh();
+  }
+
+  private closeFrame(): void {
+    const fb = this.frameBox;
+    if (!fb) return;
+    fb.frame.remove();
+    this.frameBox = null;
+    // a drag still showing (not kept) goes away with the frame
+    if (fb.live) this.draw();
+  }
+
+  // ---------- pictures ----------
+
+  /** A picture file becomes a new layer, fitted inside the paper, with the frame on it to place it. */
+  private async importImage(file: File): Promise<void> {
+    if (file.size > 50 * 1024 * 1024) { toast(t("imageTooBig")); return; }
+    const s = derive(this.page);
+    if (s.order.length >= this.maxLayers()) { toast(t("layerFull", { n: this.maxLayers() })); return; }
+    let blob: Blob, bmp: ImageBitmap;
+    try { ({ blob, bmp } = await decodePicture(file, s.w, s.h)); }
+    catch (err) { console.error(err); toast(t("imageFailed")); return; }
+    this.setMode("draw");
+    const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers } };
+    const img = nextId(doc, "image"), id = nextId(doc, "layer");
+    const name = file.name.replace(/\.[^.]+$/, "").trim().slice(0, 60) || t("imageLayerName");
+    doc.layers[id] = { name, visible: true, opacity: 1 };
+    this.doc = doc;
+    this.images.set(img, bmp);
+    this.pendingImages.set(img, blob);
+    // at most 80% of the paper, centred
+    const k = Math.min(1, (s.w * 0.8) / bmp.width, (s.h * 0.8) / bmp.height), w = bmp.width * k, h = bmp.height * k;
+    const image: ImageEntry = { kind: "image", img, x: (s.w - w) / 2, y: (s.h - h) / 2, w, h, opacity: 1 };
+    this.setPage({ ...commit(this.page, { type: "add", id, index: s.order.indexOf(this.page.active) + 1, image }), active: id });
+    this.refresh();
+    this.setMode("move");
   }
 
   /** A tap with the text tool: edit the text under it, or start a new box there. */
@@ -405,6 +492,10 @@ export class Editor {
   /** One undo step: a new text layer, or the changed (or emptied) text. */
   private saveText(d: TextData, tg: TextTarget | null): TextTarget | null {
     this.text = null;
+    // the box size is kept so the move tool can turn the text around its middle
+    const box = measureText(d);
+    d.w = box.w;
+    d.h = box.h;
     // committed straight away (undo and closing come right after); drawn again once its font is in
     void ensureFont(d.font).then((ok) => { if (ok && !this.closing) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); this.panel.thumbs(); } });
     const empty = !d.text.trim();
@@ -423,7 +514,7 @@ export class Editor {
       return { layer: id, tid: d.tid };
     }
     const before = (derive(this.page).layers[tg.layer] ?? []).find((e) => e.kind === "text" && e.tid === tg.tid);
-    const same = before?.kind === "text" && (["x", "y", "text", "font", "size", "color", "align", "rot"] as const).every((k) => before[k] === d[k]);
+    const same = before?.kind === "text" && (["x", "y", "text", "font", "size", "color", "align", "rot", "w", "h"] as const).every((k) => before[k] === d[k]);
     if (same) { this.refresh(); return tg; }
     this.act({ type: "textset", layer: tg.layer, tid: tg.tid, text: empty ? null : d });
     return empty ? null : tg;
@@ -485,9 +576,12 @@ export class Editor {
 
   private select(id: LayerId): void {
     if (id === this.page.active) return;
+    const moving = this.mode === "move";
+    if (moving) this.setMode("draw");
     this.setPage({ ...this.page, active: id });
     this.panel.update();
     this.saver.markDirty();
+    if (moving) this.setMode("move");
   }
 
   /** A new transparent layer above the active one, or a copy of `copyOf` above it. */
@@ -577,6 +671,7 @@ export class Editor {
   private history(step: (p: Page) => Page): void {
     if (this.live) return;
     this.text?.finish();
+    if (this.mode === "move") this.setMode("draw");
     const next = step(this.page);
     if (next === this.page) return;
     this.bgLive = null;
@@ -615,6 +710,7 @@ export class Editor {
     this.closing = true;
     this.live = null;
     this.text?.finish();
+    this.closeFrame();
     await this.saver.flush();
     this.lastThumb = 0;
     this.saver.markDirty();
@@ -639,4 +735,36 @@ export class Editor {
     for (const b of this.images.values()) b.close();
     this.onClosed();
   }
+}
+
+/** Pictures are kept at most this many pixels (bigger ones are made smaller on import), like the paper. */
+const MAX_PICTURE_AREA = 16e6;
+
+/**
+ * Read a picture file safely: decoded by the browser (SVG drawn to pixels first, never inserted as
+ * markup), made smaller when it is far bigger than the paper, and saved again as WebP so nothing but
+ * pixels is kept (no hidden metadata).
+ */
+async function decodePicture(file: File, paperW: number, paperH: number): Promise<{ blob: Blob; bmp: ImageBitmap }> {
+  let src: ImageBitmap | HTMLImageElement;
+  if (file.type === "image/svg+xml") {
+    const url = URL.createObjectURL(file);
+    try {
+      const im = new Image();
+      im.src = url;
+      await im.decode();
+      src = im;
+    } finally { URL.revokeObjectURL(url); }
+  } else {
+    src = await createImageBitmap(file);
+  }
+  const w0 = src.width || 1, h0 = src.height || 1;
+  const k = Math.min(1, (Math.max(paperW, paperH) * 2) / Math.max(w0, h0), Math.sqrt(MAX_PICTURE_AREA / (w0 * h0)));
+  const c = makeCanvas(Math.max(1, Math.round(w0 * k)), Math.max(1, Math.round(h0 * k)));
+  const x = ctx2d(c);
+  x.imageSmoothingQuality = "high";
+  x.drawImage(src, 0, 0, c.width, c.height);
+  if (src instanceof ImageBitmap) src.close();
+  const blob = await c.convertToBlob({ type: "image/webp", quality: 0.92 });
+  return { blob, bmp: await createImageBitmap(c) };
 }
