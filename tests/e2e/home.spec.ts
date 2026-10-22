@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { th } from "../../src/i18n/th";
 
-test("home screen shows the app name and build version", async ({ page }) => {
+test("home (the gallery) shows the app name and build version", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
@@ -26,7 +26,7 @@ test("icons and fonts load from the app itself", async ({ page }) => {
   page.on("request", (r) => { if (!r.url().startsWith("http://localhost:4173/")) outside.push(r.url()); });
   await page.goto("./");
   await page.evaluate(() => document.fonts.ready);
-  const iconOk = await page.locator("main img").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0);
+  const iconOk = await page.locator(".gicon").evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0);
   expect(iconOk).toBe(true);
   expect(await page.evaluate(() => document.fonts.check('600 32px "Mali"', "นักวาด"))).toBe(true);
   expect(outside).toEqual([]);
@@ -34,7 +34,7 @@ test("icons and fonts load from the app itself", async ({ page }) => {
 
 test("home links to the brush lab", async ({ page }) => {
   await page.goto("./");
-  await page.locator("a.button").click();
+  await page.getByRole("link", { name: th.openLab }).click();
   await expect(page).toHaveURL(/lab\.html$/);
   await expect(page.locator("canvas")).toBeVisible();
 });

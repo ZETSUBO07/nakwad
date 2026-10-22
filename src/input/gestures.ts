@@ -95,7 +95,8 @@ export class GestureRecognizer {
       this.h.strokeStart(p);
       return;
     }
-    const penBusy = (this.drawing !== null && this.drawingKind !== "touch") || p.t - this.penUpAt < this.opts.penGuardMs;
+    // the hand rests on the screen while the pen draws (a mouse has no hand on the screen)
+    const penBusy = this.drawingKind === "pen" || p.t - this.penUpAt < this.opts.penGuardMs;
     const palm = (p.width ?? 0) > this.opts.palmSize || (p.height ?? 0) > this.opts.palmSize;
     if (penBusy || palm) { this.ignored.add(p.id); return; }
     this.touches.set(p.id, { start: [p.x, p.y], now: [p.x, p.y], moved: 0 });
@@ -147,7 +148,7 @@ export class GestureRecognizer {
       const kind = this.drawingKind;
       this.drawing = null;
       this.drawingKind = null;
-      if (kind !== "touch") this.penUpAt = p.t;
+      if (kind === "pen") this.penUpAt = p.t;
       if (cancelled) this.h.strokeCancel(); else this.h.strokeEnd(p);
       if (kind !== "touch") return;
     }

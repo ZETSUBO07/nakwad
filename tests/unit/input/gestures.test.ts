@@ -68,6 +68,17 @@ describe("fingers while the pen is busy (resting hand)", () => {
     expect(log).toEqual(["pinchStart", "pinchEnd", "start 1"]);
   });
 
+  it("a mouse leaves no resting hand: fingers work right after it", () => {
+    const g = make();
+    g.down({ id: 1, kind: "mouse", x: 0, y: 0, t: 0 });
+    g.up({ id: 1, kind: "mouse", x: 0, y: 0, t: 10 });
+    g.down(finger(5, 0, 0, 20));
+    g.down(finger(6, 100, 0, 25));
+    g.up(finger(5, 0, 0, 60));
+    g.up(finger(6, 100, 0, 65));
+    expect(log).toEqual(["start 1", "end 1", "pinchStart", "pinchEnd", "tap 2"]);
+  });
+
   it("large contacts are palms", () => {
     const g = make({ fingerMode: "draw" });
     g.down(finger(5, 0, 0, 0, 80));

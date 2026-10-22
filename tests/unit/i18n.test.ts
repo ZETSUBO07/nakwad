@@ -27,7 +27,7 @@ describe("message files", () => {
 
   it("missingKeys and placeholderMismatches catch an incomplete translation", () => {
     const partial = { appName: "x", versionLabel: "v" } as Record<string, string>;
-    expect(missingKeys(th, partial)).toContain("appTagline");
+    expect(missingKeys(th, partial)).toContain("openLab");
     expect(placeholderMismatches(th, partial)).toEqual(["versionLabel"]);
   });
 
