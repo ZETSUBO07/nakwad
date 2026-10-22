@@ -1,7 +1,35 @@
 import type { Action, BgEntry, Entry, GroupEntry, LayerId, Mat, Page, PageState, TextEntry } from "./types";
 
+const turn = (m: Mat): number => m[3] ?? 0;
+/** An angle in (−π, π]. */
+const wrapAngle = (r: number): number => { const t = Math.PI * 2; let a = ((r % t) + t) % t; if (a > Math.PI) a -= t; return a; };
+/** A move as stored: rotation left out when there is none, so older works keep their exact shape. */
+const mat = (s: number, dx: number, dy: number, r: number): Mat => { const a = wrapAngle(r); return Math.abs(a) < 1e-12 ? [s, dx, dy] : [s, dx, dy, a]; };
+
+/** Where a move takes a point. */
+export function applyMat(m: Mat, x: number, y: number): [number, number] {
+  const r = turn(m), c = Math.cos(r), s = Math.sin(r);
+  return [m[0] * (c * x - s * y) + m[1], m[0] * (s * x + c * y) + m[2]];
+}
+
 /** Compose two moves: apply B first, then A. */
-export const mul = (A: Mat, B: Mat): Mat => [A[0] * B[0], A[0] * B[1] + A[1], A[0] * B[2] + A[2]];
+export function mul(A: Mat, B: Mat): Mat {
+  const [x, y] = applyMat([A[0], A[1], A[2], turn(A)], B[1], B[2]);
+  return mat(A[0] * B[0], x, y, turn(A) + turn(B));
+}
+
+/** The move that undoes `m`. */
+export function invert(m: Mat): Mat {
+  const s = 1 / m[0], r = -turn(m), c = Math.cos(r), n = Math.sin(r);
+  return mat(s, -s * (c * m[1] - n * m[2]), -s * (n * m[1] + c * m[2]), r);
+}
+
+/** Move by (dx, dy), scale by k and turn by r around the point (cx, cy). */
+export function around(cx: number, cy: number, k: number, r: number, dx = 0, dy = 0): Mat {
+  const c = Math.cos(r), n = Math.sin(r);
+  // p' = k·R·(p − c) + c + d
+  return mat(k, cx + dx - k * (c * cx - n * cy), cy + dy - k * (n * cx + c * cy), r);
+}
 
 export const bgOf = (L: readonly Entry[] | undefined): BgEntry | null => {
   const first = L?.[0];
@@ -10,7 +38,20 @@ export const bgOf = (L: readonly Entry[] | undefined): BgEntry | null => {
 
 const textOnly = (G: readonly Entry[]): G is TextEntry[] => G.length > 0 && G.every((e) => e.kind === "text");
 
-export const moveText = (t: TextEntry, m: Mat): TextEntry => ({ ...t, x: m[0] * t.x + m[1], y: m[0] * t.y + m[2], size: t.size * m[0] });
+/**
+ * Text moved with its layer stays text (still editable). Its box centre follows the move; turning
+ * adds to its own rotation. The centre comes from the box size saved at the last edit.
+ */
+export function moveText(t: TextEntry, m: Mat): TextEntry {
+  const w = t.w ?? 0, h = t.h ?? 0, k = m[0];
+  const [cx, cy] = applyMat(m, t.x + w / 2, t.y + h / 2);
+  const out: TextEntry = { ...t, x: cx - (w * k) / 2, y: cy - (h * k) / 2, size: t.size * k };
+  if (t.w !== undefined) out.w = w * k;
+  if (t.h !== undefined) out.h = h * k;
+  const r = turn(m);
+  if (r) { let deg = t.rot + (r * 180) / Math.PI; deg = ((deg + 180) % 360 + 360) % 360 - 180; out.rot = deg; }
+  return out;
+}
 
 /**
  * Move or resize wraps a layer's content in a group. The layer colour stays first and unmoved

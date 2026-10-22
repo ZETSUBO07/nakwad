@@ -215,6 +215,17 @@ export const th = {
   textMoveBox: "ลากเพื่อย้ายกล่องข้อความ",
   textLayerName: "ข้อความ",
   textHint: "แตะกระดาษเพื่อพิมพ์ หรือแตะข้อความเดิมเพื่อแก้",
+
+  // M6.5: frame (move, scale, turn), pictures
+  moveTool: "ย้าย ย่อขยาย หมุนเลเยอร์ (V)",
+  moveEmpty: "เลเยอร์ \u201c{name}\u201d ยังว่าง ไม่มีอะไรให้ย้าย",
+  frameMove: "ลากเพื่อย้าย · ลากมุมเพื่อย่อขยาย · ลากจุดด้านบนเพื่อหมุน",
+  frameRotate: "ลากเพื่อหมุน",
+  frameDone: "เสร็จ",
+  imageImport: "นำเข้ารูปเป็นเลเยอร์ใหม่",
+  imageFailed: "เปิดรูปนี้ไม่ได้ ลองไฟล์ PNG หรือ JPG อื่น",
+  imageTooBig: "ไฟล์รูปใหญ่เกิน 50 MB",
+  imageLayerName: "รูปภาพ",
 } as const;
 
 export type MessageKey = keyof typeof th;

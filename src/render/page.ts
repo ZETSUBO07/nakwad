@@ -1,6 +1,6 @@
 import { bgOf, type DrawEntry, type Entry, type LayerId, type LayerProps, type Mat, type PageState } from "../core";
 import { blit, clearAll, ctx2d, makeCanvas, type Ctx } from "./canvas";
-import { cutHole, renderBg, renderEntry, type RenderEnv } from "./entries";
+import { cutHole, renderBg, renderEntry, setMove, type RenderEnv } from "./entries";
 import { fillPaper } from "./paper";
 
 interface LayerCanvases {
@@ -121,6 +121,26 @@ export class PageRenderer {
     }
   }
 
+  /**
+   * The box around what is drawn on a layer (its colour left out), in paper pixels,
+   * or null when the layer is empty. Read from the layer's pixels, so it fits what shows.
+   */
+  contentBounds(id: LayerId): { x: number; y: number; w: number; h: number } | null {
+    const c = this.layers.get(id)?.content;
+    if (!c) return null;
+    const { width: W, height: H } = c, d = ctx2d(c).getImageData(0, 0, W, H).data;
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let y = 0; y < H; y++) {
+      const row = y * W * 4;
+      for (let x = 0; x < W; x++) {
+        if ((d[row + x * 4 + 3] ?? 0) > 8) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; y1 = y; }
+      }
+    }
+    if (x1 < 0) return null;
+    const k = this.dpr;
+    return { x: x0 / k, y: y0 / k, w: (x1 - x0 + 1) / k, h: (y1 - y0 + 1) / k };
+  }
+
   /** What a layer looks like (colour + content). */
   layerCanvas(id: LayerId): OffscreenCanvas | undefined {
     const lc = this.layers.get(id);
@@ -189,7 +209,7 @@ export class PageRenderer {
         if (lc.bg) blit(out, lc.bg, p.opacity);
         out.save();
         out.globalAlpha = p.opacity;
-        out.setTransform(this.dpr * live.m[0], 0, 0, this.dpr * live.m[0], this.dpr * live.m[1], this.dpr * live.m[2]);
+        setMove(out, live.m, this.dpr);
         out.drawImage(lc.content, 0, 0, this.state.w, this.state.h);
         out.restore();
         continue;

@@ -239,3 +239,17 @@ body.app .fontlist button[aria-checked="true"] { background: var(--sel); border-
 .tslider output { color: var(--paper); font-variant-numeric: tabular-nums; }
 .tslider .num { width: 72px; min-height: 36px; font: inherit; color: var(--paper); background: var(--night); border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; text-align: right; user-select: text; -webkit-user-select: text; }
 .text-panel .seg { grid-template-columns: repeat(3, 1fr); }
+
+/* ---------- move / scale / turn frame ---------- */
+.tframe { position: absolute; left: 0; top: 0; z-index: 7; transform-origin: 50% 50%; border: 1.5px solid var(--ink-red); box-shadow: 0 0 0 1px #fff8; cursor: move; touch-action: none; }
+.tframe.dragging { background: #e4472b10; }
+.tgrip { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 2px solid var(--ink-red); box-shadow: 0 1px 4px #0008; touch-action: none; }
+/* invisible padding makes each handle a 44px target */
+.tgrip::after { content: ""; position: absolute; inset: -9px; border-radius: 50%; }
+.tgrip.nw { left: -13px; top: -13px; cursor: nwse-resize; }
+.tgrip.ne { right: -13px; top: -13px; cursor: nesw-resize; }
+.tgrip.se { right: -13px; bottom: -13px; cursor: nwse-resize; }
+.tgrip.sw { left: -13px; bottom: -13px; cursor: nesw-resize; }
+.tgrip.rotate { left: calc(50% - 13px); top: -62px; cursor: grab; background: var(--ink-red); }
+.tstem { position: absolute; left: calc(50% - 1px); top: -36px; width: 2px; height: 36px; background: var(--ink-red); pointer-events: none; }
+body.app .frame-done { position: absolute; left: 50%; bottom: -58px; transform: translateX(-50%); min-width: 72px; }

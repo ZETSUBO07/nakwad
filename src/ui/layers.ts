@@ -26,6 +26,7 @@ export interface LayersHost {
   bg(id: LayerId, color: string | null, final: boolean): void;
   setProps(id: LayerId, patch: Partial<LayerProps>, final: boolean): void;
   exportLayer(id: LayerId): void;
+  importImage(): void;
 }
 
 const LONG_PRESS_MS = 500;
@@ -69,7 +70,8 @@ export class LayersPanel {
     this.opIn.addEventListener("input", () => { this.opOut.value = `${this.opIn.value}%`; host.setProps(host.active(), { opacity: Number(this.opIn.value) / 100 }, false); });
     this.opIn.addEventListener("change", () => host.setProps(host.active(), { opacity: Number(this.opIn.value) / 100 }, true));
     this.el = h("aside", { class: "layers", attrs: { "aria-label": t("layers") }, data: { testid: "layers" } },
-      h("div", { class: "lhead" }, h("h2", { text: t("layers") }), h("span", { class: "spacer" }), this.addBtn, close),
+      h("div", { class: "lhead" }, h("h2", { text: t("layers") }), h("span", { class: "spacer" }),
+        button({ icon: "image", title: t("imageImport"), class: "icon-btn", data: { action: "image-import" }, onClick: () => host.importImage() }), this.addBtn, close),
       this.list,
       h("label", { class: "lfoot" }, h("span", { text: t("layerOpacity") }), this.opOut, this.opIn));
 
