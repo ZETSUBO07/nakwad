@@ -8,6 +8,13 @@ updates:
     groups:
       dev-tools:
         dependency-type: development
+    ignore:
+      # Node types follow the Node version the app is built with (22, see .nvmrc)
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # typescript-eslint supports TypeScript below 6.1; move up together, by hand
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

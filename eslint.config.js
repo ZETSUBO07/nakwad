@@ -27,4 +27,9 @@ export default tseslint.config(
     files: ["*.config.{js,ts}", "tests/**/*.ts"],
     languageOptions: { globals: { ...globals.node } },
   },
+  {
+    // tests build deliberately broken data and reach into it; `!` keeps them short
+    files: ["tests/**/*.ts"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+  },
 );
