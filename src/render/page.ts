@@ -199,6 +199,21 @@ export class PageRenderer {
     }
   }
 
+  /** A small picture of the page for the gallery, at most `max` pixels on its long side. */
+  thumbnail(paper: string, max = 480): OffscreenCanvas {
+    const k = Math.min(1, max / Math.max(this.state.w, this.state.h));
+    const c = makeCanvas(this.state.w * k, this.state.h * k), x = ctx2d(c);
+    fillPaper(x, paper, 6);
+    x.imageSmoothingQuality = "high";
+    for (const id of this.state.order) {
+      const p = this.visible(id), src = this.layerCanvas(id);
+      if (!p || !src) continue;
+      x.globalAlpha = p.opacity;
+      x.drawImage(src, 0, 0, c.width, c.height);
+    }
+    return c;
+  }
+
   /** The page drawn on its own canvas, for thumbnails and export. Transparent paper stays transparent unless `paper` is given. */
   flatten(paper?: string): OffscreenCanvas {
     const c = makeCanvas(this.width, this.height), x = ctx2d(c);
