@@ -7,12 +7,12 @@ import { h } from "./dom";
  * five hand-picked colours. `onPick(value, final)` gets "white" | "cream" | "none" | "#rrggbb";
  * `final` is false while the colour wheel is still being dragged.
  */
-export function paperPicker(get: () => string, onPick: (v: string, final: boolean) => void, recent: () => readonly string[]): { el: HTMLElement; render(): void } {
+export function paperPicker(get: () => string, onPick: (v: string, final: boolean) => void, recent: () => readonly string[], opts: { noneLabel?: string; label?: string } = {}): { el: HTMLElement; render(): void } {
   const el = h("div", { class: "paperpick" });
   function render(): void {
     const v = get(), custom = isHexColor(v);
-    const seg = h("div", { class: "seg", attrs: { role: "radiogroup", "aria-label": t("paperColor") } });
-    for (const [value, label] of [["white", t("paperWhite")], ["cream", t("paperCream")], ["none", t("paperNone")]] as const) {
+    const seg = h("div", { class: "seg", attrs: { role: "radiogroup", "aria-label": opts.label ?? t("paperColor") } });
+    for (const [value, label] of [["white", t("paperWhite")], ["cream", t("paperCream")], ["none", opts.noneLabel ?? t("paperNone")]] as const) {
       const b = h("button", { attrs: { type: "button", role: "radio", "aria-checked": String(v === value) }, data: { paper: value } },
         h("span", { class: `pdot pdot-${value}` }), h("span", { text: label }));
       b.addEventListener("click", () => { onPick(value, true); render(); });

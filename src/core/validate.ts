@@ -193,7 +193,7 @@ export function validateDoc(v: unknown): ValidationResult {
   if (!isObj(v.next) || !["layer", "image", "page"].every((k) => Number.isInteger((v.next as Record<string, unknown>)[k]) && ((v.next as Record<string, number>)[k] ?? -1) >= 0)) c.fail("doc.next", "bad id counters");
   if (!isObj(v.layers)) c.fail("doc.layers", "missing");
   else for (const [id, p] of Object.entries(v.layers)) {
-    if (!isId(id) || !isObj(p) || typeof p.name !== "string" || p.name.length > LIMITS.nameLength || typeof p.visible !== "boolean" || !isUnit(p.opacity)) c.fail(`doc.layers.${id}`, "bad layer settings");
+    if (!isId(id) || !isObj(p) || typeof p.name !== "string" || p.name.length > LIMITS.nameLength || typeof p.visible !== "boolean" || !isUnit(p.opacity) || (p.locked !== undefined && typeof p.locked !== "boolean")) c.fail(`doc.layers.${id}`, "bad layer settings");
   }
   v.pages.forEach((p, i) => { if (!c.full()) page(c, p, `doc.pages[${i}]`); });
   if (!c.errors.length) {

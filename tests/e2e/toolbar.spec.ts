@@ -58,7 +58,7 @@ test("the size shows as a number and as a circle of the real size on the paper",
   await page.mouse.move(b.x + b.width * 0.6, b.y + b.height / 2, { steps: 4 });
   const value = Number(await slider.inputValue());
   expect(value).toBeGreaterThan(30);
-  await expect(toolbar(page).locator(".slider output").first()).toHaveText(String(value));
+  await expect(toolbar(page).locator('[data-field="size-number"]')).toHaveValue(String(value));
   await expect(ring).toHaveClass(/on/);
   await expect(ring.locator("span")).toHaveText(String(value));
   // the circle is the brush at the zoom the paper is shown at, where the pen last drew
@@ -73,6 +73,34 @@ test("the size shows as a number and as a circle of the real size on the paper",
   // [ and ] change it too
   await page.keyboard.press("]");
   await expect(slider).toHaveValue(String(value + 2));
+});
+
+test("type an exact size up to 300; the slider covers 1 to 100", async ({ page }) => {
+  await newWork(page);
+  const slider = toolbar(page).locator('[data-field="size"]'), box = toolbar(page).locator('[data-field="size-number"]');
+  await expect(slider).toHaveAttribute("max", "100");
+  await box.fill("250");
+  await expect(page.getByTestId("size-ring")).toHaveClass(/on/);
+  await expect(page.getByTestId("size-ring").locator("span")).toHaveText("250");
+  await box.press("Enter");
+  await expect(slider).toHaveValue("100"); // beyond the slider's end it shows full
+  const paper = (await page.getByTestId("paper").boundingBox())!;
+  const ring = (await page.getByTestId("size-ring").boundingBox())!;
+  expect(ring.width).toBeCloseTo(250 * (paper.width / 2400), -1);
+  await box.fill("999");
+  await box.press("Enter");
+  await expect(box).toHaveValue("300");
+  await box.fill("0");
+  await box.press("Enter");
+  await expect(box).toHaveValue("300"); // nonsense is ignored
+  await slider.fill("40");
+  await expect(box).toHaveValue("40");
+  // the typed size is remembered for this brush
+  await box.fill("180");
+  await box.press("Enter");
+  await page.reload();
+  await page.locator('.gcard[data-work] [data-action="open"]').click();
+  await expect(toolbar(page).locator('[data-field="size-number"]')).toHaveValue("180");
 });
 
 test("the toolbar folds, docks to the top, and is remembered", async ({ page }) => {
@@ -142,6 +170,7 @@ test("settings: hand, fingers, font style, smoothing", async ({ page }) => {
 
 test("clear the layer, and undo it", async ({ page }) => {
   await newWork(page);
+  await toolbar(page).locator('[data-field="size"]').fill("24");
   await line(page);
   const px = await pixel(page, 0.4, 0.5);
   expect(px[0]!).toBeLessThan(100);

@@ -182,6 +182,8 @@ export interface LayerProps {
   name: string;
   visible: boolean;
   opacity: number;
+  /** locked layers cannot be drawn on, erased, cleared, merged or deleted (not an undo step) */
+  locked?: boolean;
 }
 
 /** "white" | "cream" | "none" (transparent) | "#rrggbb" */
