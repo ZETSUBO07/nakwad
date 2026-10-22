@@ -1,0 +1,307 @@
+import { BRUSHES, isEraser, isHexColor, type BrushId, type StrokeEntry } from "../core";
+import { t, type MessageKey } from "../i18n";
+import { renderEntry } from "../render";
+import { drop, inset, isHorizontal, menuAt, nextSize, place, defaultTb, type Area, type TbState } from "./dock";
+import { button, h, icon } from "./dom";
+import { OP_MAX, OP_MIN, SIZE_MAX, SIZE_MIN, SWATCHES, remember, type Prefs } from "./prefs";
+
+export interface Tool { brush: BrushId; color: string; size: number; op: number }
+
+export interface ToolbarHost {
+  prefs: Prefs;
+  savePrefs(): void;
+  undo(): void;
+  redo(): void;
+  clear(): void;
+  /** the work area the toolbar floats in (screen pixels) */
+  area(): Area;
+  /** the space the toolbar takes from the paper changed */
+  insetChanged(): void;
+  toolChanged(): void;
+  /** show (or hide) the brush size as a circle on the paper while the size is being changed */
+  sizePreview(show: boolean): void;
+}
+
+const brushKey = (b: BrushId) => ("brush" + b.charAt(0).toUpperCase() + b.slice(1)) as MessageKey;
+const descKey = (b: BrushId) => (brushKey(b) + "Desc") as MessageKey;
+const orientation = (): "land" | "port" => (innerWidth >= innerHeight ? "land" : "port");
+
+/**
+ * The floating toolbar: drag it by the grip, it docks to the nearest edge or floats; tapping the
+ * grip folds it full → compact → bubble. Its place is remembered separately for each orientation.
+ */
+export class Toolbar {
+  readonly el: HTMLElement;
+  private readonly grip: HTMLElement;
+  private readonly bubble: HTMLElement;
+  private readonly brushBtn: HTMLButtonElement;
+  private readonly swatchBox: HTMLElement;
+  private readonly sizeIn: HTMLInputElement;
+  private readonly sizeOut: HTMLOutputElement;
+  private readonly sizeDot: HTMLElement;
+  private readonly opIn: HTMLInputElement;
+  private readonly opOut: HTMLOutputElement;
+  readonly undoBtn: HTMLButtonElement;
+  readonly redoBtn: HTMLButtonElement;
+  private menu: HTMLElement | null = null;
+  private tb: TbState;
+  private orient = orientation();
+  private drag: { id: number; dx: number; dy: number; x0: number; y0: number; moved: boolean } | null = null;
+  private readonly offs: (() => void)[] = [];
+
+  constructor(private readonly host: ToolbarHost) {
+    const p = host.prefs;
+    this.tb = p.toolbar[this.orient] ?? defaultTb(p.hand);
+
+    this.bubble = h("span", { class: "bubble-icon" });
+    this.grip = h("div", { class: "grip", attrs: { role: "button", tabindex: "0", "aria-label": t("toolbarGrip"), title: t("toolbarGrip") }, data: { action: "grip" } },
+      h("span", { class: "dots" }), this.bubble);
+    this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => this.toggleMenu() });
+    this.brushBtn.setAttribute("aria-haspopup", "menu");
+
+    this.swatchBox = h("div", { class: "tgroup swatches fo", attrs: { role: "group", "aria-label": t("colors") } });
+
+    this.sizeDot = h("i", { class: "size-dot" });
+    this.sizeIn = h("input", { attrs: { type: "range", min: String(SIZE_MIN), max: String(SIZE_MAX), "aria-label": t("size") }, data: { field: "size" } });
+    this.sizeOut = h("output");
+    this.opIn = h("input", { attrs: { type: "range", min: String(OP_MIN), max: String(OP_MAX), "aria-label": t("opacity") }, data: { field: "opacity" } });
+    this.opOut = h("output");
+    this.sizeIn.addEventListener("input", () => { this.setting().size = Number(this.sizeIn.value); this.changed(); host.sizePreview(true); });
+    this.sizeIn.addEventListener("change", () => host.sizePreview(false));
+    this.sizeIn.addEventListener("pointerup", () => host.sizePreview(false));
+    this.opIn.addEventListener("input", () => { this.setting().op = Number(this.opIn.value); this.changed(); });
+    const sliders = h("div", { class: "tgroup sliders fo" },
+      h("label", { class: "slider", attrs: { title: t("size") } }, h("span", { class: "dot-box" }, this.sizeDot), this.sizeOut, this.sizeIn),
+      h("label", { class: "slider", attrs: { title: t("opacity") } }, h("span", { class: "op-icon" }), this.opOut, this.opIn));
+
+    this.undoBtn = button({ icon: "undo", title: t("undo"), data: { action: "undo" }, onClick: () => host.undo() });
+    this.redoBtn = button({ icon: "redo", title: t("redo"), data: { action: "redo" }, onClick: () => host.redo() });
+    const clear = button({ icon: "clear", title: t("clearLayer"), class: "fo", data: { action: "clear" }, onClick: () => host.clear() });
+
+    this.el = h("div", { class: "tbar", attrs: { role: "toolbar", "aria-label": t("toolbar") }, data: { testid: "toolbar" } },
+      this.grip,
+      h("div", { class: "tgroup tools" }, this.brushBtn),
+      h("div", { class: "sep fo" }), this.swatchBox,
+      h("div", { class: "sep fo" }), sliders,
+      h("div", { class: "sep" }), h("div", { class: "tgroup actions" }, this.undoBtn, this.redoBtn, clear));
+
+    this.grip.addEventListener("pointerdown", this.onGripDown);
+    this.grip.addEventListener("pointermove", this.onGripMove);
+    this.grip.addEventListener("pointerup", this.onGripUp);
+    this.grip.addEventListener("pointercancel", this.onGripUp);
+    this.grip.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.setSize(nextSize(this.tb.size)); } });
+    const onResize = () => {
+      const o = orientation();
+      if (o !== this.orient) { this.orient = o; this.tb = this.host.prefs.toolbar[o] ?? defaultTb(this.host.prefs.hand); }
+      this.place();
+    };
+    window.addEventListener("resize", onResize);
+    this.offs.push(() => window.removeEventListener("resize", onResize));
+    const onDocDown = (e: PointerEvent) => { if (this.menu && !this.menu.contains(e.target as Node) && !this.brushBtn.contains(e.target as Node)) this.closeMenu(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") this.closeMenu(); };
+    document.addEventListener("pointerdown", onDocDown, true);
+    document.addEventListener("keydown", onKey);
+    this.offs.push(() => document.removeEventListener("pointerdown", onDocDown, true), () => document.removeEventListener("keydown", onKey));
+    this.sync();
+  }
+
+  get tool(): Tool {
+    const p = this.host.prefs, s = p.brushes[p.brush];
+    return { brush: p.brush, color: p.color, size: s.size, op: s.op };
+  }
+
+  /** How much room the docked toolbar takes on each side of the paper. */
+  get insets() { return inset(this.tb, this.el.offsetWidth, this.el.offsetHeight); }
+
+  private setting() { const p = this.host.prefs; return p.brushes[p.brush]; }
+
+  private changed(): void {
+    this.host.savePrefs();
+    this.sync();
+    this.host.toolChanged();
+  }
+
+  setBrush(b: BrushId): void {
+    this.host.prefs.brush = b;
+    this.changed();
+  }
+
+  setColor(c: string, pickedByHand = false): void {
+    const p = this.host.prefs;
+    if (!isHexColor(c)) return;
+    p.color = c.toLowerCase();
+    if (pickedByHand) p.colorRecent = remember(p.colorRecent, c);
+    // choosing a colour while erasing means "draw again"
+    if (isEraser(p.brush)) p.brush = "pen";
+    this.changed();
+  }
+
+  /** [ and ] keys */
+  sizeBy(d: number): void {
+    const s = this.setting();
+    s.size = Math.min(SIZE_MAX, Math.max(SIZE_MIN, s.size + d));
+    this.changed();
+    this.host.sizePreview(true);
+    this.host.sizePreview(false);
+  }
+
+  /** Put the toolbar back to its starting place (settings). */
+  reset(): void {
+    this.tb = defaultTb(this.host.prefs.hand);
+    this.store();
+  }
+
+  /** The pen hand changed: mirror a toolbar docked left or right. */
+  handChanged(): void {
+    if (this.tb.side === "left" || this.tb.side === "right") { this.tb = { ...this.tb, side: this.tb.side === "left" ? "right" : "left" }; this.store(); }
+  }
+
+  sync(): void {
+    const tool = this.tool, er = isEraser(tool.brush);
+    this.brushBtn.replaceChildren(icon(tool.brush), icon("caret"));
+    this.brushBtn.title = t("brushCurrent", { name: t(brushKey(tool.brush)) });
+    this.brushBtn.setAttribute("aria-label", this.brushBtn.title);
+    this.brushBtn.dataset.brush = tool.brush;
+    this.bubble.replaceChildren(icon(tool.brush));
+    this.bubble.style.setProperty("--bc", er ? "var(--line)" : tool.color);
+    this.sizeIn.value = String(tool.size);
+    this.sizeOut.value = String(tool.size);
+    this.opIn.value = String(tool.op);
+    this.opOut.value = t("opacityValue", { n: tool.op });
+    const d = Math.max(3, Math.min(24, tool.size));
+    this.sizeDot.style.width = this.sizeDot.style.height = `${d}px`;
+    this.sizeDot.style.background = er ? "transparent" : tool.color;
+    this.sizeDot.style.opacity = String(er ? 1 : Math.max(0.25, tool.op / 100));
+    this.renderSwatches();
+    if (this.menu) this.drawPreviews();
+  }
+
+  private renderSwatches(): void {
+    const p = this.host.prefs, er = isEraser(p.brush);
+    const sw = (c: string, recent: boolean) => {
+      const b = h("button", { class: "swatch", attrs: { type: "button", "aria-label": t("colorLabel", { color: c }), title: c, "aria-pressed": String(!er && c === p.color) }, data: { color: c, ...(recent ? { recent: "1" } : {}) } });
+      b.style.setProperty("--c", c);
+      b.addEventListener("click", () => this.setColor(c));
+      return b;
+    };
+    const input = h("input", { attrs: { type: "color", "aria-label": t("colorPick") } });
+    input.value = p.color;
+    input.addEventListener("change", () => this.setColor(input.value, true));
+    const custom = h("label", { class: "swatch pick", attrs: { title: t("colorPick") }, data: { action: "pick-color" } }, input);
+    const isCustom = !(SWATCHES as readonly string[]).includes(p.color);
+    if (isCustom && !er) custom.setAttribute("aria-current", "true");
+    this.swatchBox.replaceChildren(...SWATCHES.map((c) => sw(c, false)), custom, ...p.colorRecent.filter((c) => !(SWATCHES as readonly string[]).includes(c)).map((c) => sw(c, true)));
+  }
+
+  // ---------- brush menu ----------
+
+  private toggleMenu(): void {
+    if (this.menu) { this.closeMenu(); return; }
+    const p = this.host.prefs;
+    const menu = h("div", { class: "menu brush-menu", attrs: { role: "menu", "aria-label": t("brushes") }, data: { testid: "brush-menu" } }, h("h2", { text: t("brushes") }));
+    BRUSHES.forEach((b, i) => {
+      const o = h("button", { class: "bopt", attrs: { type: "button", role: "menuitemradio", "aria-checked": String(b === p.brush) }, data: { brush: b } },
+        h("canvas"), h("b", {}, icon(b), h("span", { text: t(brushKey(b)) }), h("kbd", { text: String(i + 1) })), h("small", { text: t(descKey(b)) }));
+      o.addEventListener("click", () => { this.setBrush(b); this.closeMenu(); });
+      menu.append(o);
+    });
+    this.el.parentElement?.append(menu);
+    this.menu = menu;
+    this.brushBtn.setAttribute("aria-expanded", "true");
+    const a = this.host.area(), r = this.el.getBoundingClientRect(), br = this.brushBtn.getBoundingClientRect();
+    const at = menuAt({ x: br.x, y: br.y, w: br.width, h: br.height }, menu.offsetWidth, menu.offsetHeight, { x: r.x, y: r.y, w: r.width, h: r.height }, a);
+    const host = menu.offsetParent?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    menu.style.transform = `translate(${at.x - host.left}px, ${at.y - host.top}px)`;
+    this.drawPreviews();
+  }
+
+  closeMenu(): void {
+    this.menu?.remove();
+    this.menu = null;
+    this.brushBtn.setAttribute("aria-expanded", "false");
+  }
+
+  /** A short sample stroke of every brush, in the current colour and its own size and strength. */
+  private drawPreviews(): void {
+    if (!this.menu) return;
+    const p = this.host.prefs;
+    for (const c of this.menu.querySelectorAll<HTMLCanvasElement>(".bopt canvas")) {
+      const b = (c.parentElement as HTMLElement).dataset.brush as BrushId;
+      const r = c.getBoundingClientRect(), dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (r.width < 2) continue;
+      c.width = Math.round(r.width * dpr);
+      c.height = Math.round(r.height * dpr);
+      const x = c.getContext("2d");
+      if (!x) continue;
+      x.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const w = r.width, hh = r.height, pts: [number, number, number, number][] = [];
+      let time = 0;
+      for (let k = 0; k <= 40; k++) { const u = k / 40; time += u < 0.5 ? 22 : 7; pts.push([12 + u * (w - 24), hh / 2 + Math.sin(u * Math.PI * 2) * hh * 0.22, 0.5, time]); }
+      const s = p.brushes[b], er = isEraser(b);
+      const entry: StrokeEntry = { kind: "stroke", brush: er ? "pen" : b, color: er ? "#c9ced9" : p.color, size: Math.min(s.size, hh * 0.55), opacity: er ? 1 : s.op / 100, pressure: false, seed: 7, vs: 1, points: pts };
+      renderEntry(x, entry, { dpr, w, h: hh, image: () => undefined });
+    }
+  }
+
+  // ---------- placing and dragging ----------
+
+  /** Put the toolbar where its state says, inside the work area. */
+  place(): void {
+    this.el.classList.toggle("compact", this.tb.size === "compact");
+    this.el.classList.toggle("bubble", this.tb.size === "bubble");
+    this.el.classList.toggle("horizontal", isHorizontal(this.tb));
+    this.el.dataset.side = this.tb.side;
+    const a = this.host.area(), parent = this.el.offsetParent?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const at = place(this.tb, this.el.offsetWidth, this.el.offsetHeight, a);
+    this.el.style.transform = `translate(${at.x - parent.left}px, ${at.y - parent.top}px)`;
+    this.host.insetChanged();
+  }
+
+  private setSize(s: TbState["size"]): void {
+    this.tb = { ...this.tb, size: s };
+    this.closeMenu();
+    this.store();
+  }
+
+  private store(): void {
+    this.host.prefs.toolbar[this.orient] = this.tb;
+    this.host.savePrefs();
+    this.place();
+  }
+
+  private readonly onGripDown = (e: PointerEvent) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    e.preventDefault();
+    this.grip.setPointerCapture(e.pointerId);
+    this.closeMenu();
+    const r = this.el.getBoundingClientRect();
+    this.drag = { id: e.pointerId, dx: e.clientX - r.left, dy: e.clientY - r.top, x0: e.clientX, y0: e.clientY, moved: false };
+  };
+
+  private readonly onGripMove = (e: PointerEvent) => {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.id) return;
+    if (!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 6) return;
+    d.moved = true;
+    this.el.classList.add("dragging");
+    const a = this.host.area(), parent = this.el.offsetParent?.getBoundingClientRect() ?? { left: 0, top: 0 };
+    const at = place({ ...this.tb, side: "free", x: e.clientX - d.dx, y: e.clientY - d.dy }, this.el.offsetWidth, this.el.offsetHeight, a);
+    this.el.style.transform = `translate(${at.x - parent.left}px, ${at.y - parent.top}px)`;
+  };
+
+  private readonly onGripUp = (e: PointerEvent) => {
+    const d = this.drag;
+    if (!d || e.pointerId !== d.id) return;
+    this.drag = null;
+    this.el.classList.remove("dragging");
+    if (!d.moved) { this.setSize(nextSize(this.tb.size)); return; }
+    const r = this.el.getBoundingClientRect();
+    this.tb = drop(this.tb, { x: r.left, y: r.top, w: r.width, h: r.height }, this.host.area());
+    this.store();
+  };
+
+  destroy(): void {
+    this.closeMenu();
+    for (const off of this.offs) off();
+  }
+}

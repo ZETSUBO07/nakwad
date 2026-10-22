@@ -182,15 +182,21 @@ test("two-finger tap undoes in the app too", async ({ page }) => {
 });
 
 test("longer translated text still fits (pseudo language, every text 40% longer)", async ({ page }) => {
-  await page.goto("./?lang=pseudo");
-  await newWork(page);
-  await page.locator('[data-action="gallery"]').click();
-  await page.locator('[data-action="new-work"]').click();
   // nothing may be cut: every button and label shows all of its text
-  const cut = await page.evaluate(() => [...document.querySelectorAll("button, label, h1, h2, p, b")]
+  const cut = () => page.evaluate(() => [...document.querySelectorAll("button, label, h1, h2, p, b, small, output")]
     // work names are the user's own and end in "…" on purpose; everything else must fit
     .filter((e) => e.getClientRects().length && getComputedStyle(e).textOverflow !== "ellipsis" && e.scrollWidth > e.clientWidth + 1)
     .map((e) => e.textContent));
-  expect(cut).toEqual([]);
+  await page.goto("./?lang=pseudo");
+  await newWork(page);
+  await page.getByTestId("toolbar").locator('[data-action="brush"]').click();
+  expect(await cut()).toEqual([]);
+  await page.keyboard.press("Escape");
+  await page.locator('[data-action="settings"]').click();
+  expect(await cut()).toEqual([]);
+  await page.keyboard.press("Escape");
+  await page.locator('[data-action="gallery"]').click();
+  await page.locator('[data-action="new-work"]').click();
+  expect(await cut()).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

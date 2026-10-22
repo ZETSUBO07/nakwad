@@ -1,16 +1,25 @@
-import { canRedo, canUndo, commit, derive, redo, undo, type Page, type Point, type StrokeEntry, type WorkDoc } from "../core";
+import { BRUSHES, canRedo, canUndo, commit, derive, redo, undo, type Page, type Point, type StrokeEntry, type WorkDoc } from "../core";
 import { t } from "../i18n";
-import { IDENTITY, Stabilizer, attachInput, zoomPercent, type Frame, type InputController, type View } from "../input";
+import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
 import { PageRenderer, fitScale, onCanvasRestored, targetDpr } from "../render";
 import { AutoSaver, StorageError, acquireWorkLock, requestPersistence, type SaveStatus, type Store, type WorkMeta } from "../storage";
+import type { Area } from "./dock";
 import { button, h } from "./dom";
+import { applyPrefsToPage, type Prefs } from "./prefs";
+import { openSettings } from "./settings";
 import { toast } from "./toast";
+import { Toolbar } from "./toolbar";
 
-/** Until the toolbar arrives (M6.2) the editor draws with one pen. */
-const PEN = { brush: "pen", color: "#1d2230", size: 6, opacity: 1 } as const;
-const STABILIZER = 15;
 /** a fresh gallery picture at most this often while drawing (always on close) */
 const THUMB_EVERY_MS = 10_000;
+/** the size circle stays this long after the size stops changing */
+const SIZE_RING_MS = 700;
+
+export interface EditorEnv {
+  store: Store;
+  prefs: Prefs;
+  savePrefs(): void;
+}
 
 export type OpenResult = { ok: true; editor: Editor } | { ok: false; message: string };
 
@@ -18,16 +27,16 @@ export type OpenResult = { ok: true; editor: Editor } | { ok: false; message: st
  * Open a work for drawing. Holds the work's lock (one window at a time), loads it (recovering the
  * undo history after a crash), and saves automatically until `close()`.
  */
-export async function openEditor(store: Store, id: string, onClose: () => void): Promise<OpenResult> {
+export async function openEditor(env: EditorEnv, id: string, onClose: () => void): Promise<OpenResult> {
   const lock = await acquireWorkLock(id).catch(() => null);
   if (!lock) return { ok: false, message: t("workLocked") };
   try {
-    const loaded = await store.loadWork(id, Date.now());
+    const loaded = await env.store.loadWork(id, Date.now());
     const images = new Map<string, ImageBitmap>();
     for (const [key, blob] of loaded.images) {
       try { images.set(key, await createImageBitmap(blob)); } catch (err) { console.error(err); }
     }
-    const editor = new Editor(store, loaded.meta, loaded.doc, images, () => { lock.release(); onClose(); });
+    const editor = new Editor(env, loaded.meta, loaded.doc, images, () => { lock.release(); onClose(); });
     if (loaded.recovered) toast(t("workRecovered"));
     if (loaded.migrated) editor.markDirty();
     return { ok: true, editor };
@@ -40,42 +49,65 @@ export async function openEditor(store: Store, id: string, onClose: () => void):
 
 export class Editor {
   readonly el: HTMLElement;
+  private readonly work: HTMLElement;
   private readonly desk: HTMLElement;
+  private readonly stage: HTMLElement;
   private readonly canvas: HTMLCanvasElement;
   private readonly out: CanvasRenderingContext2D;
   private readonly ring: HTMLElement;
+  private readonly sizeRing: HTMLElement;
   private readonly pill: HTMLElement;
-  private readonly undoBtn: HTMLButtonElement;
-  private readonly redoBtn: HTMLButtonElement;
   private readonly zoomBtn: HTMLButtonElement;
+  private readonly toolbar: Toolbar;
   private readonly renderer: PageRenderer;
   private readonly saver: AutoSaver;
   private readonly input: InputController;
+  private readonly store: Store;
+  private readonly prefs: Prefs;
   private readonly cleanups: (() => void)[] = [];
   private fit = 1;
   private view: View = IDENTITY;
   private live: StrokeEntry | null = null;
   private predicted: Point[] = [];
   private stab = new Stabilizer(0);
+  /** where the pen last touched the paper (paper pixels): the size circle shows there */
+  private lastPoint: [number, number] | null = null;
+  private sizeTimer = 0;
   private raf = 0;
   private lastThumb = 0;
   private askedPersist = false;
   private closing = false;
 
-  constructor(private readonly store: Store, private meta: WorkMeta, private doc: WorkDoc, private readonly images: Map<string, ImageBitmap>, private readonly onClosed: () => void) {
+  constructor(private readonly env: EditorEnv, private meta: WorkMeta, private doc: WorkDoc, private readonly images: Map<string, ImageBitmap>, private readonly onClosed: () => void) {
+    this.store = env.store;
+    this.prefs = env.prefs;
     this.renderer = new PageRenderer({ image: (key) => this.images.get(key) });
     this.canvas = h("canvas", { class: "paper", data: { testid: "paper" } });
     this.out = this.canvas.getContext("2d", { desynchronized: true, alpha: false }) as CanvasRenderingContext2D;
     this.ring = h("div", { class: "hover-ring" });
     this.ring.hidden = true;
+    this.sizeRing = h("div", { class: "size-ring", data: { testid: "size-ring" } }, h("span"));
+    this.sizeRing.hidden = true;
+    this.stage = h("div", { class: "stage" }, this.canvas);
+    this.desk = h("div", { class: "desk" }, this.stage, this.ring, this.sizeRing);
     this.zoomBtn = button({ class: "zoom-badge", title: t("zoomFit"), data: { action: "zoom" }, onClick: () => this.setView(IDENTITY, true) });
-    this.desk = h("div", { class: "desk" }, this.canvas, this.ring, this.zoomBtn);
+    this.toolbar = new Toolbar({
+      prefs: this.prefs,
+      savePrefs: () => env.savePrefs(),
+      undo: () => this.history(undo),
+      redo: () => this.history(redo),
+      clear: () => this.clearLayer(),
+      area: () => this.area(),
+      insetChanged: () => this.applyInset(),
+      toolChanged: () => this.ring.hidden = true,
+      sizePreview: (show) => this.sizePreview(show),
+    });
+    this.work = h("div", { class: "work" }, this.desk, this.zoomBtn, this.toolbar.el);
     this.pill = h("span", { class: "save-pill", attrs: { role: "status" }, data: { testid: "save" } });
-    this.undoBtn = button({ icon: "undo", title: t("undo"), class: "icon-btn", data: { action: "undo" }, onClick: () => this.history(undo) });
-    this.redoBtn = button({ icon: "redo", title: t("redo"), class: "icon-btn", data: { action: "redo" }, onClick: () => this.history(redo) });
     const back = button({ icon: "gallery", label: t("gallery"), class: "bar-btn", data: { action: "gallery" }, onClick: () => void this.close() });
-    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), this.undoBtn, this.redoBtn);
-    this.el = h("div", { class: "editor" }, bar, this.desk);
+    const settings = button({ icon: "settings", title: t("settings"), class: "icon-btn", data: { action: "settings" }, onClick: () => this.settings() });
+    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), settings);
+    this.el = h("div", { class: "editor" }, bar, this.work);
 
     this.saver = new AutoSaver({ save: () => this.save(), onStatus: (s, e) => this.showStatus(s, e) });
     this.showStatus("saved");
@@ -91,19 +123,58 @@ export class Editor {
       redo: () => this.history(redo),
       fit: () => this.setView(IDENTITY, true),
       hover: (at) => this.hover(at),
-    });
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
-      const k = e.key.toLowerCase();
+    }, this.prefs.finger);
+    window.addEventListener("keydown", this.onKey);
+    this.cleanups.push(() => window.removeEventListener("keydown", this.onKey));
+    const ro = new ResizeObserver(() => this.layout());
+    ro.observe(this.stage);
+    this.cleanups.push(() => ro.disconnect());
+    const ro2 = new ResizeObserver(() => this.toolbar.place());
+    ro2.observe(this.work);
+    this.cleanups.push(() => ro2.disconnect());
+    this.cleanups.push(onCanvasRestored(this.canvas, () => { this.renderer.rebuild(); this.draw(); }));
+  }
+
+  private readonly onKey = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest("dialog") || (target instanceof HTMLInputElement && target.type !== "range")) return;
+    const k = e.key.toLowerCase();
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       if (k === "z") { e.preventDefault(); this.history(e.shiftKey ? redo : undo); }
       else if (k === "y") { e.preventDefault(); this.history(redo); }
-    };
-    window.addEventListener("keydown", onKey);
-    this.cleanups.push(() => window.removeEventListener("keydown", onKey));
-    const ro = new ResizeObserver(() => this.layout());
-    ro.observe(this.desk);
-    this.cleanups.push(() => ro.disconnect());
-    this.cleanups.push(onCanvasRestored(this.canvas, () => { this.renderer.rebuild(); this.draw(); }));
+      return;
+    }
+    if (e.altKey || e.metaKey) return;
+    // 1–8 pick a brush (7 and 8 are the two erasers), [ and ] change the size
+    if (/^[1-8]$/.test(k)) { const b = BRUSHES[Number(k) - 1]; if (b) this.toolbar.setBrush(b); }
+    else if (k === "[" || k === "]") this.toolbar.sizeBy(k === "]" ? 2 : -2);
+  };
+
+  private settings(): void {
+    openSettings({
+      prefs: this.prefs,
+      savePrefs: () => this.env.savePrefs(),
+      applied: (what) => {
+        if (what === "finger") this.input.setFingerMode(this.prefs.finger);
+        if (what === "hand") this.toolbar.handChanged();
+        applyPrefsToPage(this.prefs);
+      },
+      resetToolbar: () => { this.toolbar.reset(); toast(t("setTbResetDone")); },
+    });
+  }
+
+  private area(): Area {
+    const r = this.work.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  }
+
+  /** Keep the paper clear of a docked toolbar. */
+  private applyInset(): void {
+    const i = this.toolbar.insets;
+    this.stage.style.left = `${i.left}px`;
+    this.stage.style.right = `${i.right}px`;
+    this.stage.style.top = `${i.top}px`;
+    this.stage.style.bottom = `${i.bottom}px`;
   }
 
   private get page(): Page { return this.doc.pages[this.doc.current] as Page; }
@@ -117,12 +188,12 @@ export class Editor {
   // ---------- layout and drawing ----------
 
   private frame(): Frame {
-    const r = this.desk.getBoundingClientRect(), s = derive(this.page);
+    const r = this.stage.getBoundingClientRect(), s = derive(this.page);
     return { center: [r.left + r.width / 2, r.top + r.height / 2], fit: this.fit, w: s.w, h: s.h };
   }
 
   private layout(): void {
-    const s = derive(this.page), r = this.desk.getBoundingClientRect();
+    const s = derive(this.page), r = this.stage.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return;
     this.fit = fitScale(r.width, r.height, s.w, s.h, 32);
     this.canvas.style.width = `${s.w * this.fit}px`;
@@ -157,8 +228,8 @@ export class Editor {
   private draw(): void {
     const entry = this.live && this.predicted.length ? { ...this.live, points: [...this.live.points, ...this.predicted] } : this.live;
     this.renderer.composite(this.out, this.doc.paper, entry ? { kind: "draw", layer: this.page.active, entry } : undefined);
-    this.undoBtn.disabled = !canUndo(this.page);
-    this.redoBtn.disabled = !canRedo(this.page);
+    this.toolbar.undoBtn.disabled = !canUndo(this.page);
+    this.toolbar.redoBtn.disabled = !canRedo(this.page);
   }
 
   private redraw(): void {
@@ -167,19 +238,36 @@ export class Editor {
 
   private hover(at: [number, number] | null): void {
     if (!at) { this.ring.hidden = true; return; }
-    const d = PEN.size * this.view.s * this.fit, r = this.desk.getBoundingClientRect();
+    const d = Math.max(2, this.toolbar.tool.size * this.view.s * this.fit), r = this.desk.getBoundingClientRect();
     this.ring.hidden = false;
     this.ring.style.width = this.ring.style.height = `${d}px`;
     this.ring.style.transform = `translate(${at[0] - r.left - d / 2}px, ${at[1] - r.top - d / 2}px)`;
   }
 
+  /** While the size changes, show the brush as a circle of its real size where the pen last drew. */
+  private sizePreview(show: boolean): void {
+    clearTimeout(this.sizeTimer);
+    if (!show) { this.sizeTimer = window.setTimeout(() => this.sizeRing.classList.remove("on"), SIZE_RING_MS); return; }
+    const f = this.frame(), size = this.toolbar.tool.size;
+    const at = toScreen(this.view, f, this.lastPoint ?? [f.w / 2, f.h / 2]);
+    const r = this.desk.getBoundingClientRect(), d = Math.max(2, size * this.view.s * f.fit);
+    this.sizeRing.style.width = this.sizeRing.style.height = `${d}px`;
+    this.sizeRing.style.transform = `translate(${at[0] - r.left - d / 2}px, ${at[1] - r.top - d / 2}px)`;
+    (this.sizeRing.firstElementChild as HTMLElement).textContent = String(size);
+    this.sizeRing.hidden = false;
+    this.sizeRing.classList.add("on");
+  }
+
   // ---------- strokes and history ----------
 
   private strokeStart(p: Point, pressure: boolean): void {
-    this.stab = new Stabilizer(STABILIZER);
+    this.toolbar.closeMenu();
+    const tool = this.toolbar.tool;
+    this.stab = new Stabilizer(this.prefs.stab);
     this.renderer.prepareStroke(this.page.active);
+    this.lastPoint = [p[0], p[1]];
     this.live = {
-      kind: "stroke", brush: PEN.brush, color: PEN.color, size: PEN.size, opacity: PEN.opacity,
+      kind: "stroke", brush: tool.brush, color: tool.color, size: tool.size, opacity: tool.op / 100,
       // the stroke keeps the width the user sees on screen, whatever the zoom
       pressure, seed: (Math.random() * 1e9) | 0, vs: this.fit * this.view.s, points: [this.stab.start(p)],
     };
@@ -190,6 +278,8 @@ export class Editor {
   private strokeMove(points: Point[], guess: Point[]): void {
     if (!this.live) return;
     for (const p of points) this.live.points.push(this.stab.add(p));
+    const last = points[points.length - 1];
+    if (last) this.lastPoint = [last[0], last[1]];
     this.predicted = this.stab.active ? [] : guess;
     this.redraw();
   }
@@ -202,6 +292,16 @@ export class Editor {
     this.predicted = [];
     this.setPage(commit(this.page, { type: "draw", layer, entry }));
     this.renderer.applyDraw(derive(this.page), layer, entry);
+    this.draw();
+    this.saver.markDirty();
+  }
+
+  private clearLayer(): void {
+    if (this.live) return;
+    const layer = this.page.active;
+    if (!(derive(this.page).layers[layer] ?? []).length) return;
+    this.setPage(commit(this.page, { type: "clear", layer }));
+    this.renderer.setState(derive(this.page), this.doc.layers);
     this.draw();
     this.saver.markDirty();
   }
@@ -255,6 +355,7 @@ export class Editor {
       return;
     }
     this.input.detach();
+    this.toolbar.destroy();
     for (const c of this.cleanups) c();
     try {
       await this.store.closeWork(this.meta.id, this.doc, Date.now());
