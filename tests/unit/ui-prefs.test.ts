@@ -28,7 +28,7 @@ describe("app settings in the browser", () => {
     expect(p.paperRecent).toEqual(["#aabbcc", "#112233", "#000000", "#111111", "#222222"]);
     expect([p.hand, p.finger, p.font, p.stab, p.brush, p.color]).toEqual(["right", "draw", "brush", 100, "marker", "#abcdef"]);
     expect(p.colorRecent).toEqual(["#010203"]);
-    expect(p.brushes.pen).toEqual({ size: 80, op: 5 });
+    expect(p.brushes.pen).toEqual({ size: 300, op: 5 });
     expect(p.brushes.ink).toEqual(BRUSH_DEFAULTS.ink);
     expect(p.toolbar.land).toEqual({ size: "compact", side: "top", along: 0.5, x: 0, y: 0 });
     expect(p.toolbar.port).toBeUndefined();

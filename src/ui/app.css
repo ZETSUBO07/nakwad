@@ -130,8 +130,11 @@ body.app .tbar .swatch.pick { background: conic-gradient(red, #ff0, lime, cyan, 
 .tbar .swatch.pick input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; border: 0; padding: 0; }
 .tbar .sliders { grid-template-columns: 92px; gap: 10px; }
 .tbar .slider { display: grid; grid-template-columns: auto 1fr; align-items: center; justify-items: end; gap: 2px 4px; font-size: .82rem; font-variant-numeric: tabular-nums; }
-.tbar .slider input { grid-column: 1 / -1; width: 92px; height: 32px; margin: 0; accent-color: var(--ink-red); }
+.tbar .slider input[type="range"] { grid-column: 1 / -1; width: 92px; height: 32px; margin: 0; accent-color: var(--ink-red); }
 .tbar .slider output { min-width: 3ch; text-align: right; }
+.tbar .size-num { width: 56px; min-height: 36px; font: inherit; font-size: .88rem; font-variant-numeric: tabular-nums; text-align: right; color: var(--paper);
+  background: var(--night); border: 1px solid var(--line); border-radius: 8px; padding: 0 6px; user-select: text; -webkit-user-select: text; -moz-appearance: textfield; }
+.tbar .size-num::-webkit-inner-spin-button, .tbar .size-num::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .tbar .dot-box { justify-self: start; width: 26px; height: 26px; display: grid; place-items: center; }
 .tbar .size-dot { display: block; border-radius: 50%; box-shadow: 0 0 0 1px var(--muted); }
 .tbar .op-icon { justify-self: start; width: 20px; height: 20px; border-radius: 50%; background: linear-gradient(90deg, var(--paper) 50%, transparent 50%); box-shadow: 0 0 0 1px var(--muted); }

@@ -3,7 +3,7 @@ import { t, type MessageKey } from "../i18n";
 import { renderEntry } from "../render";
 import { drop, inset, isHorizontal, menuAt, nextSize, place, defaultTb, type Area, type TbState } from "./dock";
 import { button, h, icon } from "./dom";
-import { OP_MAX, OP_MIN, SIZE_MAX, SIZE_MIN, SWATCHES, remember, type Prefs } from "./prefs";
+import { OP_MAX, OP_MIN, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SWATCHES, remember, type Prefs } from "./prefs";
 
 export interface Tool { brush: BrushId; color: string; size: number; op: number }
 
@@ -37,7 +37,7 @@ export class Toolbar {
   private readonly brushBtn: HTMLButtonElement;
   private readonly swatchBox: HTMLElement;
   private readonly sizeIn: HTMLInputElement;
-  private readonly sizeOut: HTMLOutputElement;
+  private readonly sizeNum: HTMLInputElement;
   private readonly sizeDot: HTMLElement;
   private readonly opIn: HTMLInputElement;
   private readonly opOut: HTMLOutputElement;
@@ -62,8 +62,19 @@ export class Toolbar {
     this.swatchBox = h("div", { class: "tgroup swatches fo", attrs: { role: "group", "aria-label": t("colors") } });
 
     this.sizeDot = h("i", { class: "size-dot" });
-    this.sizeIn = h("input", { attrs: { type: "range", min: String(SIZE_MIN), max: String(SIZE_MAX), "aria-label": t("size") }, data: { field: "size" } });
-    this.sizeOut = h("output");
+    this.sizeIn = h("input", { attrs: { type: "range", min: String(SIZE_MIN), max: String(SIZE_SLIDER_MAX), "aria-label": t("size") }, data: { field: "size" } });
+    // type an exact size, up to SIZE_MAX (the slider stops at SIZE_SLIDER_MAX)
+    this.sizeNum = h("input", { class: "size-num", attrs: { type: "number", min: String(SIZE_MIN), max: String(SIZE_MAX), step: "1", inputmode: "numeric", "aria-label": t("sizeExact", { max: SIZE_MAX }), title: t("sizeExact", { max: SIZE_MAX }) }, data: { field: "size-number" } });
+    const typed = (final: boolean) => {
+      const v = Math.round(Number(this.sizeNum.value));
+      if (!Number.isFinite(v) || v < SIZE_MIN) { if (final) this.sync(); return; }
+      this.setting().size = Math.min(SIZE_MAX, v);
+      if (final) this.changed(); else { this.host.savePrefs(); this.syncSlider(); this.host.toolChanged(); }
+      host.sizePreview(!final);
+    };
+    this.sizeNum.addEventListener("input", () => typed(false));
+    this.sizeNum.addEventListener("change", () => typed(true));
+    this.sizeNum.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); this.sizeNum.blur(); } });
     this.opIn = h("input", { attrs: { type: "range", min: String(OP_MIN), max: String(OP_MAX), "aria-label": t("opacity") }, data: { field: "opacity" } });
     this.opOut = h("output");
     this.sizeIn.addEventListener("input", () => { this.setting().size = Number(this.sizeIn.value); this.changed(); host.sizePreview(true); });
@@ -71,7 +82,7 @@ export class Toolbar {
     this.sizeIn.addEventListener("pointerup", () => host.sizePreview(false));
     this.opIn.addEventListener("input", () => { this.setting().op = Number(this.opIn.value); this.changed(); });
     const sliders = h("div", { class: "tgroup sliders fo" },
-      h("label", { class: "slider", attrs: { title: t("size") } }, h("span", { class: "dot-box" }, this.sizeDot), this.sizeOut, this.sizeIn),
+      h("div", { class: "slider" }, h("span", { class: "dot-box" }, this.sizeDot), this.sizeNum, this.sizeIn),
       h("label", { class: "slider", attrs: { title: t("opacity") } }, h("span", { class: "op-icon" }), this.opOut, this.opIn));
 
     this.undoBtn = button({ icon: "undo", title: t("undo"), data: { action: "undo" }, onClick: () => host.undo() });
@@ -164,16 +175,21 @@ export class Toolbar {
     this.brushBtn.dataset.brush = tool.brush;
     this.bubble.replaceChildren(icon(tool.brush));
     this.bubble.style.setProperty("--bc", er ? "var(--line)" : tool.color);
-    this.sizeIn.value = String(tool.size);
-    this.sizeOut.value = String(tool.size);
+    this.syncSlider();
+    if (document.activeElement !== this.sizeNum) this.sizeNum.value = String(tool.size);
     this.opIn.value = String(tool.op);
     this.opOut.value = t("opacityValue", { n: tool.op });
-    const d = Math.max(3, Math.min(24, tool.size));
-    this.sizeDot.style.width = this.sizeDot.style.height = `${d}px`;
     this.sizeDot.style.background = er ? "transparent" : tool.color;
     this.sizeDot.style.opacity = String(er ? 1 : Math.max(0.25, tool.op / 100));
     this.renderSwatches();
     if (this.menu) this.drawPreviews();
+  }
+
+  /** The slider shows sizes above its end as full. */
+  private syncSlider(): void {
+    this.sizeIn.value = String(Math.min(SIZE_SLIDER_MAX, this.tool.size));
+    const d = Math.max(3, Math.min(24, this.tool.size));
+    this.sizeDot.style.width = this.sizeDot.style.height = `${d}px`;
   }
 
   private renderSwatches(): void {

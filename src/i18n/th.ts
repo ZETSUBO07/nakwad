@@ -132,6 +132,7 @@ export const th = {
   colorPick: "เลือกสีเอง",
   colorRecent: "สีที่เลือกเองล่าสุด",
   size: "ขนาดหัวปากกา",
+  sizeExact: "พิมพ์ขนาดหัวปากกา (1–{max})",
   opacity: "ความเข้มของสี",
   opacityValue: "{n}%",
   clearLayer: "ล้างเลเยอร์นี้",

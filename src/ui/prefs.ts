@@ -44,7 +44,9 @@ export const BRUSH_DEFAULTS: Record<BrushId, BrushSetting> = {
   eraser: { size: 24, op: 100 },
   eraserall: { size: 24, op: 100 },
 };
-export const SIZE_MIN = 1, SIZE_MAX = 80, OP_MIN = 5, OP_MAX = 100;
+export const SIZE_MIN = 1, SIZE_MAX = 300, OP_MIN = 5, OP_MAX = 100;
+/** The size slider covers 1–100; bigger sizes (up to SIZE_MAX) are typed in the number box. */
+export const SIZE_SLIDER_MAX = 100;
 /** The colours always on the toolbar. */
 export const SWATCHES = ["#1d2230", "#e23b3b", "#f08c1a", "#f2c522", "#2fa65a", "#2f54d6", "#8a3fd1", "#ffffff"] as const;
 
