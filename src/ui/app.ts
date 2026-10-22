@@ -5,7 +5,7 @@ import { Store } from "../storage";
 import { openEditor } from "./editor";
 import { Gallery } from "./gallery";
 import { askNewWork } from "./newWork";
-import { loadPrefs } from "./prefs";
+import { applyPrefsToPage, loadPrefs, savePrefs } from "./prefs";
 import { toast } from "./toast";
 
 /**
@@ -27,6 +27,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     console.error(err);
   }
   const prefs = loadPrefs();
+  applyPrefsToPage(prefs);
   let busy = false;
 
   const gallery = new Gallery(store, prefs, {
@@ -43,7 +44,7 @@ export async function startApp(root: HTMLElement): Promise<void> {
     if (!store || busy) return;
     busy = true;
     try {
-      const r = await openEditor(store, id, () => void showGallery());
+      const r = await openEditor({ store, prefs, savePrefs: () => savePrefs(prefs) }, id, () => void showGallery());
       if (!r.ok) { toast(r.message, 6000); return; }
       root.replaceChildren(r.editor.el);
     } finally {
