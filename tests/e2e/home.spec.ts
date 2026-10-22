@@ -31,3 +31,10 @@ test("icons and fonts load from the app itself", async ({ page }) => {
   expect(await page.evaluate(() => document.fonts.check('600 32px "Mali"', "นักวาด"))).toBe(true);
   expect(outside).toEqual([]);
 });
+
+test("home links to the brush lab", async ({ page }) => {
+  await page.goto("./");
+  await page.locator("a.button").click();
+  await expect(page).toHaveURL(/lab\.html$/);
+  await expect(page.locator("canvas")).toBeVisible();
+});
