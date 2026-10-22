@@ -20,6 +20,9 @@ export interface ToolbarHost {
   toolChanged(): void;
   /** show (or hide) the brush size as a circle on the paper while the size is being changed */
   sizePreview(show: boolean): void;
+  /** switch the text tool on or off */
+  toggleText(): void;
+  textMode(): boolean;
 }
 
 const brushKey = (b: BrushId) => ("brush" + b.charAt(0).toUpperCase() + b.slice(1)) as MessageKey;
@@ -35,6 +38,7 @@ export class Toolbar {
   private readonly grip: HTMLElement;
   private readonly bubble: HTMLElement;
   private readonly brushBtn: HTMLButtonElement;
+  private readonly textBtn: HTMLButtonElement;
   private readonly swatchBox: HTMLElement;
   private readonly sizeIn: HTMLInputElement;
   private readonly sizeNum: HTMLInputElement;
@@ -58,6 +62,7 @@ export class Toolbar {
       h("span", { class: "dots" }), this.bubble);
     this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => this.toggleMenu() });
     this.brushBtn.setAttribute("aria-haspopup", "menu");
+    this.textBtn = button({ label: "T", title: t("textTool"), class: "text-btn", data: { action: "text" }, onClick: () => { this.closeMenu(); host.toggleText(); } });
 
     this.swatchBox = h("div", { class: "tgroup swatches fo", attrs: { role: "group", "aria-label": t("colors") } });
 
@@ -91,7 +96,7 @@ export class Toolbar {
 
     this.el = h("div", { class: "tbar", attrs: { role: "toolbar", "aria-label": t("toolbar") }, data: { testid: "toolbar" } },
       this.grip,
-      h("div", { class: "tgroup tools" }, this.brushBtn),
+      h("div", { class: "tgroup tools" }, this.brushBtn, this.textBtn),
       h("div", { class: "sep fo" }), this.swatchBox,
       h("div", { class: "sep fo" }), sliders,
       h("div", { class: "sep" }), h("div", { class: "tgroup actions" }, this.undoBtn, this.redoBtn, clear));
@@ -168,7 +173,9 @@ export class Toolbar {
   }
 
   sync(): void {
-    const tool = this.tool, er = isEraser(tool.brush);
+    const tool = this.tool, er = isEraser(tool.brush), texting = this.host.textMode();
+    this.textBtn.setAttribute("aria-pressed", String(texting));
+    this.brushBtn.setAttribute("aria-pressed", String(!texting));
     this.brushBtn.replaceChildren(icon(tool.brush), icon("caret"));
     this.brushBtn.title = t("brushCurrent", { name: t(brushKey(tool.brush)) });
     this.brushBtn.setAttribute("aria-label", this.brushBtn.title);
