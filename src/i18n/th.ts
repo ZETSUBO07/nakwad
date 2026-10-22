@@ -9,6 +9,28 @@ export const th = {
   appTagline: "แอปวาดรูปสำหรับแท็บเล็ตกับปากกา",
   buildingNotice: "กำลังสร้างรุ่น 1 หน้านี้ใช้ตรวจว่าการเผยแพร่ทำงาน",
   versionLabel: "เวอร์ชัน {version}",
+  openLab: "ลองหัวปากกา",
+
+  // brush names
+  brushPen: "ปากกาลูกลื่น",
+  brushPencil: "ดินสอ",
+  brushInk: "พู่กันหมึก",
+  brushNib: "ปากกาหัวตัด",
+  brushMarker: "มาร์กเกอร์",
+  brushSpray: "สเปรย์",
+  brushEraser: "ยางลบเส้น",
+  brushEraserall: "ยางลบทั้งหมด",
+
+  // brush lab (milestone M4): a page to try the drawing engine on the tablet
+  labTitle: "ห้องทดลองหัวปากกา",
+  labHint: "หน้านี้ไว้ลองหัวปากกาก่อนแอปจริงเสร็จ งานในหน้านี้ไม่ถูกบันทึก",
+  labBack: "กลับหน้าแรก",
+  labUndo: "ย้อนกลับ",
+  labRedo: "ทำซ้ำ",
+  labClear: "ล้างเลเยอร์",
+  labLayerColor: "สีพื้นเลเยอร์",
+  labSize: "ขนาด",
+  labFrameTime: "วาดหนึ่งเฟรม {ms} มิลลิวินาที",
 } as const;
 
 export type MessageKey = keyof typeof th;

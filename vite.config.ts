@@ -1,5 +1,6 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
@@ -55,6 +56,13 @@ export default defineConfig({
     // keep every asset a real file so the CSP never needs data: for scripts, styles or fonts
     assetsInlineLimit: 0,
     sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        // brush lab (milestone M4): try the drawing engine on the tablet before the full app exists
+        lab: fileURLToPath(new URL("./lab.html", import.meta.url)),
+      },
+    },
   },
   plugins: [
     securityMeta(),

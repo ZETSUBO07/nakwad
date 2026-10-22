@@ -27,7 +27,12 @@ function render(root: HTMLElement): void {
   version.dataset.testid = "version";
   version.textContent = t("versionLabel", { version: __APP_VERSION__ });
 
-  box.append(icon, title, tagline, notice, version);
+  const lab = document.createElement("a");
+  lab.className = "button";
+  lab.href = `${import.meta.env.BASE_URL}lab.html`;
+  lab.textContent = t("openLab");
+
+  box.append(icon, title, tagline, notice, lab, version);
   root.replaceChildren(box);
   document.title = t("appName");
 }

@@ -39,3 +39,8 @@ body {
 .splash p { margin: 0; line-height: 1.6; }
 .splash .muted { color: var(--muted); font-size: .9rem; }
 .splash .version { font-variant-numeric: tabular-nums; color: var(--muted); font-size: .8rem; letter-spacing: .02em; }
+.splash .button {
+  margin-top: 8px; display: inline-flex; align-items: center; min-height: 48px; padding: 0 22px; border-radius: 12px;
+  background: var(--ink-red); color: #fff; text-decoration: none; font-weight: 600;
+}
+.splash .button:focus-visible { outline: 3px solid var(--paper); outline-offset: 2px; }

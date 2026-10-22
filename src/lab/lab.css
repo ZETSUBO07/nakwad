@@ -1,0 +1,21 @@
+body.lab { display: flex; flex-direction: column; place-items: stretch; padding: 0; height: 100%; overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+body.lab #app { flex: 1; min-height: 0; display: flex; flex-direction: column; width: 100%; }
+.labbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
+  background: #1b1d24; border-bottom: 1px solid #2c2f3a;
+}
+.labbar h1 { font-family: var(--display); font-size: 1.1rem; margin: 0 8px 0 0; color: var(--ink-red); font-weight: 600; }
+.labbar a, .labbar button, .labbar label {
+  font: inherit; font-size: .88rem; color: var(--paper); background: #262a35; border: 1px solid #343846;
+  border-radius: 10px; min-height: 44px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px; text-decoration: none; cursor: pointer;
+}
+.labbar button[aria-pressed="true"] { background: var(--ink-red); border-color: var(--ink-red); color: #fff; }
+.labbar .swatch { width: 32px; min-width: 32px; padding: 0; border-radius: 50%; border: 2px solid #343846; }
+.labbar .swatch[aria-pressed="true"] { outline: 3px solid var(--paper); outline-offset: 1px; }
+.labbar input[type="range"] { width: 120px; accent-color: var(--ink-red); }
+.labbar .spacer { flex: 1; }
+.labbar .meter { color: var(--muted); font-size: .8rem; font-variant-numeric: tabular-nums; min-width: 12em; }
+.labhint { color: var(--muted); font-size: .78rem; margin: 0; padding: 6px max(12px, env(safe-area-inset-left)); }
+.desk { flex: 1; min-height: 0; display: grid; place-items: center; background: #0c0d11; overflow: hidden; }
+.desk canvas { touch-action: none; box-shadow: 0 4px 24px #0008; border-radius: 2px; }
