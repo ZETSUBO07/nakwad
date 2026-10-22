@@ -1,4 +1,4 @@
-import { BRUSHES, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, invert, layersFor, mul, nextId, redo, replaceLast, undo, validActive, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
+import { BRUSHES, LIMITS, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, invert, layersFor, mul, newPage, nextId, paperFill, redo, replaceLast, undo, validActive, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
 import { PageRenderer, drawText, fitScale, hitText, makeCanvas, ctx2d, measureText, onCanvasRestored, targetDpr } from "../render";
@@ -9,6 +9,9 @@ import { ensureFont, ensureFonts, loadImportedFonts } from "./fonts";
 import { LayersPanel } from "./layers";
 import { TextSession, type TextTarget } from "./textTool";
 import { TransformFrame } from "./transform";
+import { openExport } from "./exporter";
+import { PageStrip } from "./pages";
+import { askNewPage, openPaperDialog } from "./paperDialog";
 import { applyPrefsToPage, remember, type Prefs } from "./prefs";
 import { openSettings } from "./settings";
 import { toast } from "./toast";
@@ -72,6 +75,11 @@ export class Editor {
   /** the move / scale / turn frame: its layer, what has been kept so far, and the drag being shown */
   private frameBox: { frame: TransformFrame; layer: LayerId; kept: Mat | null; live: Mat | null } | null = null;
   private readonly fileIn: HTMLInputElement;
+  private readonly strip: PageStrip;
+  private readonly paperBtn: HTMLButtonElement;
+  private stripTimer = 0;
+  /** paper size the view was last laid out for */
+  private laidOut = { w: 0, h: 0 };
   private text: TextSession | null = null;
   /** pictures made in this session (text turned into a picture) that are not saved yet */
   private readonly pendingImages = new Map<string, Blob>();
@@ -152,7 +160,19 @@ export class Editor {
     this.pill = h("span", { class: "save-pill", attrs: { role: "status" }, data: { testid: "save" } });
     const back = button({ icon: "gallery", label: t("gallery"), class: "bar-btn", data: { action: "gallery" }, onClick: () => void this.close() });
     const settings = button({ icon: "settings", title: t("settings"), class: "icon-btn", data: { action: "settings" }, onClick: () => this.settings() });
-    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, h("span", { class: "spacer" }), this.layersBtn, settings);
+    this.strip = new PageStrip({
+      doc: () => this.doc,
+      currentThumb: (max) => this.renderer.thumbnail(this.doc.paper, max),
+      image: (key) => this.images.get(key),
+      open: (i) => this.openPage(i),
+      add: () => void this.addPage(),
+      duplicate: () => this.duplicatePage(),
+      remove: () => this.removePage(),
+    });
+    this.paperBtn = button({ label: t("paperLabel"), title: t("paperButton"), class: "bar-btn paper-btn", data: { action: "paper" }, onClick: () => this.paperDialog() });
+    this.paperBtn.prepend(h("i", { class: "pdot paper-dot" }));
+    const exportBtn = button({ icon: "download", label: t("exportButton"), class: "bar-btn", data: { action: "export" }, onClick: () => { this.text?.finish(); this.setMode("draw"); openExport({ doc: () => this.doc, workName: () => this.meta.name, image: (key) => this.images.get(key) }); } });
+    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, this.strip.el, this.paperBtn, exportBtn, this.layersBtn, settings);
     this.el = h("div", { class: "editor" }, bar, workspace, this.fileIn);
     // a picture dropped on the paper becomes a new layer
     this.work.addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
@@ -184,6 +204,8 @@ export class Editor {
     this.cleanups.push(() => ro2.disconnect());
     this.cleanups.push(onCanvasRestored(this.canvas, () => { this.renderer.rebuild(); this.draw(); }));
     void this.loadFonts();
+    this.syncPaper();
+    requestAnimationFrame(() => { if (!this.closing) this.strip.update(); });
   }
 
   private readonly onKey = (e: KeyboardEvent) => {
@@ -250,6 +272,7 @@ export class Editor {
     const s = derive(this.page), r = this.stage.getBoundingClientRect();
     if (r.width < 2 || r.height < 2) return;
     this.fit = fitScale(r.width, r.height, s.w, s.h, 32);
+    this.laidOut = { w: s.w, h: s.h };
     this.canvas.style.width = `${s.w * this.fit}px`;
     this.canvas.style.height = `${s.h * this.fit}px`;
     this.resolution(true);
@@ -356,6 +379,7 @@ export class Editor {
     this.draw();
     this.panel.thumbs();
     this.saver.markDirty();
+    this.stripSoon();
   }
 
   // ---------- text ----------
@@ -568,9 +592,100 @@ export class Editor {
   private refresh(): void {
     const s = derive(this.page), active = validActive(s, this.page.active);
     if (active && active !== this.page.active) this.setPage({ ...this.page, active });
+    // the paper changed size (resize, or undoing one): lay the view out again
+    if (s.w !== this.laidOut.w || s.h !== this.laidOut.h) { this.view = IDENTITY; this.layout(); this.panel.update(); this.saver.markDirty(); this.stripSoon(); return; }
     this.renderer.setState(this.shown(), this.doc.layers);
     this.draw();
     this.panel.update();
+    this.saver.markDirty();
+    this.stripSoon();
+  }
+
+  /** The page chips show the open page; redrawn shortly after a change, not on every stroke point. */
+  private stripSoon(): void {
+    clearTimeout(this.stripTimer);
+    this.stripTimer = window.setTimeout(() => { if (!this.closing) this.strip.update(); }, 400);
+  }
+
+  // ---------- pages and paper ----------
+
+  private paperDialog(): void {
+    this.text?.finish();
+    this.setMode("draw");
+    const s = derive(this.page);
+    openPaperDialog({
+      prefs: this.prefs,
+      savePrefs: () => this.env.savePrefs(),
+      size: () => ({ w: s.w, h: s.h }),
+      paper: () => this.doc.paper,
+      setPaper: (v) => { this.doc = { ...this.doc, paper: v }; this.syncPaper(); this.draw(); this.saver.markDirty(); this.stripSoon(); },
+      resize: (w, h, m) => { this.act({ type: "resize", w, h, m }); toast(t("paperResized", { w, h })); },
+    });
+  }
+
+  /** The paper button shows the paper colour and this page's size. */
+  private syncPaper(): void {
+    const dot = this.paperBtn.querySelector<HTMLElement>(".paper-dot");
+    if (dot) { dot.classList.toggle("pdot-none", this.doc.paper === "none"); dot.style.background = this.doc.paper === "none" ? "" : paperFill(this.doc.paper); }
+  }
+
+  /** Leave whatever tool is half done before the page under it changes. */
+  private settle(): void {
+    this.text?.finish();
+    this.setMode("draw");
+    this.live = null;
+  }
+
+  private openPage(i: number): void {
+    if (i === this.doc.current || !this.doc.pages[i]) return;
+    this.settle();
+    this.openPageAfterChange(i);
+  }
+
+  private async addPage(): Promise<void> {
+    this.settle();
+    if (this.doc.pages.length >= LIMITS.pages) { toast(t("pageLimit", { n: LIMITS.pages })); return; }
+    const s = derive(this.page);
+    const size = await askNewPage({ w: s.w, h: s.h });
+    if (!size || this.closing) return;
+    const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers }, pages: [...this.doc.pages] };
+    const layer = nextId(doc, "layer");
+    doc.layers[layer] = { name: t("layerDefaultName", { n: 1 }), visible: true, opacity: 1 };
+    doc.pages.splice(doc.current + 1, 0, newPage(nextId(doc, "page"), size.w, size.h, layer));
+    this.doc = doc;
+    this.openPageAfterChange(doc.current + 1);
+  }
+
+  /** A copy of this page as it looks now (its own layers; the copy starts with no undo history). */
+  private duplicatePage(): void {
+    this.settle();
+    if (this.doc.pages.length >= LIMITS.pages) { toast(t("pageLimit", { n: LIMITS.pages })); return; }
+    const s = derive(this.page);
+    const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers }, pages: [...this.doc.pages] };
+    const ids = new Map(s.order.map((id) => [id, nextId(doc, "layer")]));
+    const layers: Page["base"]["layers"] = {};
+    for (const [old, id] of ids) { layers[id] = [...(s.layers[old] ?? [])]; doc.layers[id] = { ...(doc.layers[old] ?? { name: id, visible: true, opacity: 1 }) }; }
+    const order = s.order.map((id) => ids.get(id) ?? id);
+    const copy: Page = { id: nextId(doc, "page"), base: { w: s.w, h: s.h, order, layers }, actions: [], redo: [], active: ids.get(this.page.active) ?? order[order.length - 1] ?? "" };
+    doc.pages.splice(doc.current + 1, 0, copy);
+    this.doc = doc;
+    this.openPageAfterChange(doc.current + 1);
+  }
+
+  private removePage(): void {
+    if (this.doc.pages.length < 2) return;
+    this.settle();
+    const pages = this.doc.pages.filter((_, i) => i !== this.doc.current);
+    this.doc = { ...this.doc, pages, current: Math.min(this.doc.current, pages.length - 1) };
+    this.openPageAfterChange(this.doc.current);
+  }
+
+  private openPageAfterChange(i: number): void {
+    this.doc = { ...this.doc, current: i };
+    this.view = IDENTITY;
+    this.layout();
+    this.panel.update();
+    this.strip.update();
     this.saver.markDirty();
   }
 
@@ -722,6 +837,7 @@ export class Editor {
       return;
     }
     this.input.detach();
+    clearTimeout(this.stripTimer);
     this.toolbar.destroy();
     this.panel.destroy();
     for (const c of this.cleanups) c();

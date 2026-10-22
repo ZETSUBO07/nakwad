@@ -16,7 +16,9 @@ export default defineConfig({
     {
       // roughly the Xiaomi Pad 6S Pro in landscape (3048×2032 at 2× density)
       name: "tablet-landscape",
-      use: { ...devices["Desktop Chrome"], viewport: { width: 1524, height: 1016 }, hasTouch: true, launchOptions: { executablePath } },
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1524, height: 1016 }, hasTouch: true,
+        // a UTF-8 locale, as on any phone or desktop: without it Chromium drops non-ASCII (Thai) download names
+        launchOptions: { executablePath, env: { ...process.env, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" } } },
     },
   ],
   webServer: {
