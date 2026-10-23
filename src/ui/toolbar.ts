@@ -2,7 +2,7 @@ import { BRUSHES, isEraser, isHexColor, type BrushId, type StrokeEntry } from ".
 import { t, type MessageKey } from "../i18n";
 import { renderEntry } from "../render";
 import { drop, inset, isHorizontal, menuAt, nextSize, place, defaultTb, type Area, type TbState } from "./dock";
-import { button, h, icon } from "./dom";
+import { button, h, icon, type IconName } from "./dom";
 import { OP_MAX, OP_MIN, SIZE_MAX, SIZE_MIN, SIZE_SLIDER_MAX, SWATCHES, remember, type Prefs } from "./prefs";
 
 export interface Tool { brush: BrushId; color: string; size: number; op: number }
@@ -26,6 +26,20 @@ export interface ToolbarHost {
   /** switch the move / scale / turn frame on or off */
   toggleMove(): void;
   moveMode(): boolean;
+  selectMode(): boolean;
+  /** what the selection menu offers right now */
+  selectItems(): MenuItem[];
+}
+
+export interface MenuItem {
+  key: MessageKey;
+  icon: IconName;
+  enabled: boolean;
+  /** shown as a radio item (the shape choice) */
+  checked?: boolean;
+  kbd?: string;
+  data: string;
+  act(): void;
 }
 
 const brushKey = (b: BrushId) => ("brush" + b.charAt(0).toUpperCase() + b.slice(1)) as MessageKey;
@@ -43,6 +57,7 @@ export class Toolbar {
   private readonly brushBtn: HTMLButtonElement;
   private readonly textBtn: HTMLButtonElement;
   private readonly moveBtn: HTMLButtonElement;
+  private readonly selBtn: HTMLButtonElement;
   private readonly swatchBox: HTMLElement;
   private readonly sizeIn: HTMLInputElement;
   private readonly sizeNum: HTMLInputElement;
@@ -66,6 +81,8 @@ export class Toolbar {
       h("span", { class: "dots" }), this.bubble);
     this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => this.toggleMenu() });
     this.brushBtn.setAttribute("aria-haspopup", "menu");
+    this.selBtn = button({ icon: "select", title: t("selectTool"), data: { action: "select" }, onClick: () => this.toggleSelectMenu() });
+    this.selBtn.setAttribute("aria-haspopup", "menu");
     this.moveBtn = button({ icon: "move", title: t("moveTool"), data: { action: "move" }, onClick: () => { this.closeMenu(); host.toggleMove(); } });
     this.textBtn = button({ label: "T", title: t("textTool"), class: "text-btn", data: { action: "text" }, onClick: () => { this.closeMenu(); host.toggleText(); } });
 
@@ -101,7 +118,7 @@ export class Toolbar {
 
     this.el = h("div", { class: "tbar", attrs: { role: "toolbar", "aria-label": t("toolbar") }, data: { testid: "toolbar" } },
       this.grip,
-      h("div", { class: "tgroup tools" }, this.brushBtn, this.moveBtn, this.textBtn),
+      h("div", { class: "tgroup tools" }, this.brushBtn, this.selBtn, this.moveBtn, this.textBtn),
       h("div", { class: "sep fo" }), this.swatchBox,
       h("div", { class: "sep fo" }), sliders,
       h("div", { class: "sep" }), h("div", { class: "tgroup actions" }, this.undoBtn, this.redoBtn, clear));
@@ -118,7 +135,10 @@ export class Toolbar {
     };
     window.addEventListener("resize", onResize);
     this.offs.push(() => window.removeEventListener("resize", onResize));
-    const onDocDown = (e: PointerEvent) => { if (this.menu && !this.menu.contains(e.target as Node) && !this.brushBtn.contains(e.target as Node)) this.closeMenu(); };
+    const onDocDown = (e: PointerEvent) => {
+      const tgt = e.target as Node;
+      if (this.menu && !this.menu.contains(tgt) && !this.brushBtn.contains(tgt) && !this.selBtn.contains(tgt)) this.closeMenu();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") this.closeMenu(); };
     document.addEventListener("pointerdown", onDocDown, true);
     document.addEventListener("keydown", onKey);
@@ -178,10 +198,11 @@ export class Toolbar {
   }
 
   sync(): void {
-    const tool = this.tool, er = isEraser(tool.brush), texting = this.host.textMode(), moving = this.host.moveMode();
+    const tool = this.tool, er = isEraser(tool.brush), texting = this.host.textMode(), moving = this.host.moveMode(), selecting = this.host.selectMode();
     this.textBtn.setAttribute("aria-pressed", String(texting));
     this.moveBtn.setAttribute("aria-pressed", String(moving));
-    this.brushBtn.setAttribute("aria-pressed", String(!texting && !moving));
+    this.selBtn.setAttribute("aria-pressed", String(selecting));
+    this.brushBtn.setAttribute("aria-pressed", String(!texting && !moving && !selecting));
     this.brushBtn.replaceChildren(icon(tool.brush), icon("caret"));
     this.brushBtn.title = t("brushCurrent", { name: t(brushKey(tool.brush)) });
     this.brushBtn.setAttribute("aria-label", this.brushBtn.title);
@@ -234,20 +255,44 @@ export class Toolbar {
       o.addEventListener("click", () => { this.setBrush(b); this.closeMenu(); });
       menu.append(o);
     });
+    this.popup(menu, this.brushBtn);
+    this.drawPreviews();
+  }
+
+  /** Show a menu beside the button that opened it, towards the middle of the screen. */
+  private popup(menu: HTMLElement, anchor: HTMLElement): void {
     this.el.parentElement?.append(menu);
     this.menu = menu;
-    this.brushBtn.setAttribute("aria-expanded", "true");
-    const a = this.host.area(), r = this.el.getBoundingClientRect(), br = this.brushBtn.getBoundingClientRect();
+    anchor.setAttribute("aria-expanded", "true");
+    const a = this.host.area(), r = this.el.getBoundingClientRect(), br = anchor.getBoundingClientRect();
     const at = menuAt({ x: br.x, y: br.y, w: br.width, h: br.height }, menu.offsetWidth, menu.offsetHeight, { x: r.x, y: r.y, w: r.width, h: r.height }, a);
     const host = menu.offsetParent?.getBoundingClientRect() ?? { left: 0, top: 0 };
     menu.style.transform = `translate(${at.x - host.left}px, ${at.y - host.top}px)`;
-    this.drawPreviews();
+  }
+
+  private toggleSelectMenu(): void {
+    const open = this.menu?.dataset.testid === "select-menu";
+    this.closeMenu();
+    if (open) return;
+    const menu = h("div", { class: "menu lmenu sel-menu", attrs: { role: "menu", "aria-label": t("selectTool") }, data: { testid: "select-menu" } });
+    for (const it of this.host.selectItems()) {
+      if (it.data === "-") { menu.append(h("hr")); continue; }
+      const b = button({ icon: it.icon, label: t(it.key), class: "mi", data: { item: it.data } });
+      b.setAttribute("role", it.checked === undefined ? "menuitem" : "menuitemradio");
+      if (it.checked !== undefined) b.setAttribute("aria-checked", String(it.checked));
+      if (it.kbd) b.append(h("kbd", { text: it.kbd }));
+      b.disabled = !it.enabled;
+      b.addEventListener("click", () => { this.closeMenu(); it.act(); });
+      menu.append(b);
+    }
+    this.popup(menu, this.selBtn);
   }
 
   closeMenu(): void {
     this.menu?.remove();
     this.menu = null;
     this.brushBtn.setAttribute("aria-expanded", "false");
+    this.selBtn.setAttribute("aria-expanded", "false");
   }
 
   /** A short sample stroke of every brush, in the current colour and its own size and strength. */

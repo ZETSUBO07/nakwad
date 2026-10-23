@@ -192,6 +192,9 @@ test("longer translated text still fits (pseudo language, every text 40% longer)
   await page.getByTestId("toolbar").locator('[data-action="brush"]').click();
   expect(await cut()).toEqual([]);
   await page.keyboard.press("Escape");
+  await page.getByTestId("toolbar").locator('[data-action="select"]').click();
+  expect(await cut()).toEqual([]);
+  await page.keyboard.press("Escape");
   await page.locator('[data-action="settings"]').click();
   expect(await cut()).toEqual([]);
   await page.keyboard.press("Escape");

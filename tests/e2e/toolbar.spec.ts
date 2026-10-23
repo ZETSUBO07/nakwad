@@ -179,3 +179,19 @@ test("clear the layer, and undo it", async ({ page }) => {
   await toolbar(page).locator('[data-action="undo"]').click();
   expect((await pixel(page, 0.4, 0.5))[0]!).toBeLessThan(100);
 });
+
+test("the line keeps up with the pen while drawing, even with strong smoothing", async ({ page }) => {
+  await newWork(page);
+  await page.locator('[data-action="settings"]').click();
+  await page.locator('#settings [data-field="stab"]').fill("80");
+  await page.keyboard.press("Escape");
+  await toolbar(page).locator('[data-field="size"]').fill("24");
+  const r = (await page.getByTestId("paper").boundingBox())!;
+  const y = r.y + r.height / 2;
+  await page.mouse.move(r.x + r.width * 0.1, y);
+  await page.mouse.down();
+  for (let i = 1; i <= 12; i++) await page.mouse.move(r.x + r.width * (0.1 + i * 0.05), y);
+  // still pressing: the drawn line already reaches the pen
+  expect((await pixel(page, 0.69, 0.5))[0]!).toBeLessThan(100);
+  await page.mouse.up();
+});
