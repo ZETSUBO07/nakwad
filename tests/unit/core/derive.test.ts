@@ -16,6 +16,12 @@ describe("layers", () => {
     expect(s.order).toEqual(["L2", "L3"]);
   });
 
+  it("a new layer can start filled with a colour", () => {
+    const s = run(page(), { type: "add", id: "L2", index: 1, color: "#ffffff" });
+    expect(s.layers.L2).toEqual([{ kind: "bg", color: "#ffffff", holes: [] }]);
+    expect(bgOf(s.layers.L2)?.color).toBe("#ffffff");
+  });
+
   it("ignores moves of layers that do not exist", () => {
     expect(run(page(), { type: "move", id: "nope", to: 0 }).order).toEqual(["L1"]);
   });

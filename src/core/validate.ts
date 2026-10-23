@@ -135,6 +135,7 @@ function action(c: Checker, v: unknown, path: string): boolean {
       if (v.copyOf !== undefined && !isId(v.copyOf)) return c.fail(path + ".copyOf", "bad id");
       if (v.image !== undefined && !(isObj(v.image) && v.image.kind === "image" && entry(c, v.image, path + ".image", 0))) return c.fail(path + ".image", "bad picture");
       if (v.text !== undefined && !text(c, v.text, path + ".text")) return false;
+      if (v.color !== undefined && !isHexColor(v.color)) return c.fail(path + ".color", "bad colour");
       return true;
     case "del":
       return isId(v.id) || c.fail(path, "bad delete");

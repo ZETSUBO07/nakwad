@@ -71,6 +71,8 @@ export class GestureRecognizer {
   /** the pointer that is drawing, if any */
   private drawing: number | null = null;
   private drawingKind: PointerKind | null = null;
+  /** where the drawing pointer was last seen */
+  private last: Ptr | null = null;
   private penUpAt = -Infinity;
   private touches = new Map<number, Touch>();
   /** touches we decided to ignore until they lift */
@@ -82,6 +84,8 @@ export class GestureRecognizer {
   }
 
   get isDrawing(): boolean { return this.drawing !== null; }
+  /** the pointer that is drawing, if any */
+  get drawingId(): number | null { return this.drawing; }
 
   down(p: Ptr): void {
     if (p.kind !== "touch") {
@@ -89,8 +93,17 @@ export class GestureRecognizer {
       if (this.session) this.endSession(p.t, true);
       for (const id of this.touches.keys()) this.ignored.add(id);
       this.touches.clear();
-      if (this.drawing !== null) return;
+      if (this.drawing !== null) {
+        if (this.drawingKind === "touch") {
+          // a finger (or a resting palm) was drawing: the pen takes over and that line is dropped
+          this.h.strokeCancel();
+        } else if (this.last) {
+          // a pen has one tip: a new contact means the lift of the last one never arrived
+          this.h.strokeEnd(this.last);
+        }
+      }
       this.drawing = p.id;
+      this.last = p;
       this.drawingKind = p.kind;
       this.h.strokeStart(p);
       return;
@@ -106,6 +119,7 @@ export class GestureRecognizer {
     if (this.touches.size === 1 && this.opts.fingerMode === "draw" && this.drawing === null) {
       this.drawing = p.id;
       this.drawingKind = "touch";
+      this.last = p;
       this.h.strokeStart(p);
       return;
     }
@@ -128,7 +142,7 @@ export class GestureRecognizer {
   }
 
   move(p: Ptr): void {
-    if (this.drawing === p.id) { this.h.strokeMove(p); return; }
+    if (this.drawing === p.id) { this.last = p; this.h.strokeMove(p); return; }
     const t = this.touches.get(p.id);
     if (!t) return;
     t.moved = Math.max(t.moved, Math.hypot(p.x - t.start[0], p.y - t.start[1]));
@@ -148,6 +162,7 @@ export class GestureRecognizer {
       const kind = this.drawingKind;
       this.drawing = null;
       this.drawingKind = null;
+      this.last = null;
       if (kind === "pen") this.penUpAt = p.t;
       if (cancelled) this.h.strokeCancel(); else this.h.strokeEnd(p);
       if (kind !== "touch") return;
@@ -189,6 +204,7 @@ export class GestureRecognizer {
     if (this.session?.pinch) this.h.pinchEnd();
     this.drawing = null;
     this.drawingKind = null;
+    this.last = null;
     this.touches.clear();
     this.ignored.clear();
     this.session = null;

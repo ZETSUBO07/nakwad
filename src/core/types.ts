@@ -161,7 +161,7 @@ export type DrawEntry = StrokeEntry | ImageEntry | ReplaceEntry | SelEraseEntry 
 // ---------- actions (one per undo step) ----------
 
 export type Action =
-  | { type: "add"; id: LayerId; index: number; copyOf?: LayerId; image?: ImageEntry; text?: TextData }
+  | { type: "add"; id: LayerId; index: number; copyOf?: LayerId; image?: ImageEntry; text?: TextData; /** a new empty layer filled with this colour */ color?: string }
   | { type: "del"; id: LayerId }
   | { type: "move"; id: LayerId; to: number }
   | { type: "merge"; id: LayerId; into: LayerId; alpha: number }

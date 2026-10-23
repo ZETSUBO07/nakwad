@@ -33,9 +33,50 @@ async function line(page: Page, y = 0.5) {
 const pixel = (page: Page, fx: number, fy: number) => page.getByTestId("paper").evaluate((c: HTMLCanvasElement, [a, b]) =>
   [...c.getContext("2d")!.getImageData(Math.round(c.width * a!), Math.round(c.height * b!), 1, 1).data], [fx, fy]);
 
+/** add layers and make them see-through (a new layer starts white) */
 async function addLayers(page: Page, n: number) {
-  for (let i = 0; i < n; i++) await page.locator('[data-action="layer-add"]').click();
+  for (let i = 0; i < n; i++) {
+    await page.locator('[data-action="layer-add"]').click();
+    await page.locator(".lrow.active [data-action=\"layer-color\"]").click();
+    await page.getByTestId("layer-color").locator('[data-paper="none"]').click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByTestId("layer-color")).toHaveCount(0);
+  }
 }
+
+test("a new layer starts white and covers what is below; its colour can be taken away", async ({ page }) => {
+  await newWork(page);
+  await line(page);
+  expect((await pixel(page, 0.3, 0.5))[0]!).toBeLessThan(100);
+  await page.locator('[data-action="layer-add"]').click();
+  expect(await pixel(page, 0.3, 0.5)).toEqual([255, 255, 255, 255]);
+  await expect(page.locator(".lrow.active .lbg .pdot")).not.toHaveClass(/pdot-none/);
+  // one undo step takes the whole new layer away
+  await undoBtn(page).click();
+  expect(await names(page)).toEqual([name(1)]);
+  expect((await pixel(page, 0.3, 0.5))[0]!).toBeLessThan(100);
+});
+
+test("tap the name of the chosen layer to type a new one; Escape keeps the old", async ({ page }) => {
+  await newWork(page);
+  await page.locator('[data-action="layer-add"]').click();
+  // a tap on a layer that is not chosen only chooses it
+  await row(page, 1).locator(".lname b").click();
+  await expect(row(page, 1)).toHaveClass(/active/);
+  await expect(page.locator('[data-field="layer-name"]')).toHaveCount(0);
+  await row(page, 1).locator(".lname b").click();
+  const input = page.locator('[data-field="layer-name"]');
+  await expect(input).toBeFocused();
+  await page.keyboard.type("ฉากหลัง"); // the old name is selected, so typing replaces it
+  await page.keyboard.press("Enter");
+  expect(await names(page)).toEqual([name(2), "ฉากหลัง"]);
+  await rows(page).last().locator(".lname b").click();
+  await page.keyboard.type("x");
+  await page.keyboard.press("Escape");
+  expect(await names(page)).toEqual([name(2), "ฉากหลัง"]);
+  // typing a name never draws, switches tools or deletes anything
+  await expect(page.getByTestId("toolbar").locator('[data-action="brush"]')).toHaveAttribute("data-brush", "pen");
+});
 
 test("add, choose, hide, set strength, and undo adding", async ({ page }) => {
   await newWork(page);
@@ -57,6 +98,7 @@ test("add, choose, hide, set strength, and undo adding", async ({ page }) => {
   const faint = await pixel(page, 0.3, 0.5);
   expect(faint[0]!).toBeGreaterThan(120);
   await undoBtn(page).click(); // the stroke (strength is a setting, not a step)
+  await undoBtn(page).click(); // taking the white away from the second added layer
   await undoBtn(page).click(); // the second added layer
   expect(await names(page)).toEqual([name(2), name(1)]);
 });

@@ -82,6 +82,8 @@ export function attachInput(el: HTMLElement, host: InputHost, fingerMode: Finger
     current = null;
   };
   const onUp = (e: PointerEvent) => { current = e; g.up(ptr(e), e.type === "pointercancel"); current = null; };
+  // some tablets let go of the pointer without sending its lift: take that as the lift
+  const onLost = (e: PointerEvent) => { if (g.drawingId === e.pointerId) { current = e; g.up(ptr(e)); current = null; } };
   const onLeave = (e: PointerEvent) => { if (e.pointerType === "pen") host.hover(null); };
 
   let wheelTimer = 0;
@@ -101,6 +103,7 @@ export function attachInput(el: HTMLElement, host: InputHost, fingerMode: Finger
   el.addEventListener("pointerup", onUp);
   el.addEventListener("pointercancel", onUp);
   el.addEventListener("pointerleave", onLeave);
+  el.addEventListener("lostpointercapture", onLost);
   el.addEventListener("wheel", onWheel, { passive: false });
   el.addEventListener("contextmenu", noMenu);
   window.addEventListener("blur", lost);
@@ -115,6 +118,7 @@ export function attachInput(el: HTMLElement, host: InputHost, fingerMode: Finger
       el.removeEventListener("pointerup", onUp);
       el.removeEventListener("pointercancel", onUp);
       el.removeEventListener("pointerleave", onLeave);
+      el.removeEventListener("lostpointercapture", onLost);
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("contextmenu", noMenu);
       window.removeEventListener("blur", lost);

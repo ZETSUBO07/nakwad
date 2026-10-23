@@ -209,3 +209,28 @@ test("longer translated text still fits (pseudo language, every text 40% longer)
   expect(await cut()).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("tap the work's name in the top bar to type a new one", async ({ page }) => {
+  const errors = watchErrors(page);
+  await page.goto("./");
+  await newWork(page);
+  await page.locator('[data-action="work-name"]').click();
+  const input = page.locator('[data-field="work-name"]');
+  await expect(input).toBeFocused();
+  await page.keyboard.type("แมวส้ม"); // the old name is selected, so typing replaces it
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".work-name")).toHaveText("แมวส้ม");
+  // Escape leaves the name as it was; the keys typed do nothing else
+  await page.locator('[data-action="work-name"]').click();
+  await page.keyboard.type("s7");
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".work-name")).toHaveText("แมวส้ม");
+  await expect(page.getByTestId("toolbar").locator('[data-action="brush"]')).toHaveAttribute("data-brush", "pen");
+  await scribble(page);
+  await saved(page);
+  await page.locator('[data-action="gallery"]').click();
+  await expect(page.locator(".gcard[data-work] .gtext b")).toHaveText("แมวส้ม");
+  await page.reload();
+  await expect(page.locator(".gcard[data-work] .gtext b")).toHaveText("แมวส้ม");
+  expect(errors).toEqual([]);
+});

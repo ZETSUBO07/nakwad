@@ -32,13 +32,28 @@ describe("pen and mouse", () => {
     expect(log).toEqual(["start 1", "move 1", "end 1", "start 2", "cancel"]);
   });
 
-  it("a second pen contact while drawing is ignored", () => {
+  it("a new pen contact while the last lift never arrived ends that stroke and draws again", () => {
     const g = make();
     g.down(pen(1, 0, 0, 0));
-    g.down(pen(2, 0, 0, 1));
-    g.move(pen(2, 0, 0, 2));
-    g.up(pen(2, 0, 0, 3));
-    expect(log).toEqual(["start 1"]);
+    g.move(pen(1, 5, 0, 1));
+    g.down(pen(2, 0, 0, 100));
+    g.move(pen(2, 0, 9, 102));
+    g.up(pen(2, 0, 9, 103));
+    g.up(pen(1, 5, 0, 104)); // a late lift of the old contact changes nothing
+    expect(log).toEqual(["start 1", "move 1", "end 1", "start 2", "move 2", "end 2"]);
+    expect(g.drawingId).toBe(null);
+  });
+
+  it("the pen takes over from a finger (or resting palm) that was drawing", () => {
+    const g = make({ fingerMode: "draw" });
+    g.down(finger(5, 0, 0, 0));
+    g.move(finger(5, 10, 0, 10));
+    g.down(pen(1, 50, 50, 20));
+    g.move(pen(1, 60, 50, 30));
+    g.move(finger(5, 20, 0, 31));
+    g.up(finger(5, 20, 0, 35));
+    g.up(pen(1, 60, 50, 40));
+    expect(log).toEqual(["start 5", "move 5", "cancel", "start 1", "move 1", "end 1"]);
   });
 });
 

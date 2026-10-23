@@ -14,7 +14,6 @@ export const PAPER_SIZES = [
   { id: "landscape", w: 2400, h: 1600 },
   { id: "portrait", w: 1600, h: 2400 },
   { id: "square", w: 2048, h: 2048 },
-  { id: "padScreen", w: 3048, h: 2032 },
   { id: "a4", w: 2480, h: 3508 },
   { id: "a5", w: 1748, h: 2480 },
   { id: "social", w: 1080, h: 1350 },

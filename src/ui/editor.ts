@@ -56,6 +56,9 @@ export async function openEditor(env: EditorEnv, id: string, onClose: () => void
   }
 }
 
+/** spec: a layer added with + starts as white paper */
+const NEW_LAYER_COLOR = "#ffffff";
+
 export class Editor {
   readonly el: HTMLElement;
   private readonly work: HTMLElement;
@@ -103,6 +106,7 @@ export class Editor {
   private view: View = IDENTITY;
   private live: StrokeEntry | null = null;
   private predicted: Point[] = [];
+  private readonly nameBtn: HTMLButtonElement;
   private stab = new Stabilizer(0);
   /** where the pen last touched the paper (paper pixels): the size circle shows there */
   private lastPoint: [number, number] | null = null;
@@ -184,7 +188,9 @@ export class Editor {
     this.paperBtn = button({ label: t("paperLabel"), title: t("paperButton"), class: "bar-btn paper-btn", data: { action: "paper" }, onClick: () => this.paperDialog() });
     this.paperBtn.prepend(h("i", { class: "pdot paper-dot" }));
     const exportBtn = button({ icon: "download", label: t("exportButton"), class: "bar-btn", data: { action: "export" }, onClick: () => { this.text?.finish(); this.setMode("draw"); openExport({ doc: () => this.doc, workName: () => this.meta.name, image: (key) => this.images.get(key) }); } });
-    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-name", text: meta.name }), this.pill, this.strip.el, this.paperBtn, exportBtn, this.layersBtn, settings);
+    this.nameBtn = button({ label: meta.name, class: "work-name", data: { action: "work-name" }, onClick: () => this.editName() });
+    this.nameBtn.title = t("workRename");
+    const bar = h("header", { class: "ebar" }, back, h("h1", { class: "work-title" }, this.nameBtn), this.pill, this.strip.el, this.paperBtn, exportBtn, this.layersBtn, settings);
     this.el = h("div", { class: "editor" }, bar, workspace, this.fileIn);
     // a picture dropped on the paper becomes a new layer
     this.work.addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
@@ -218,6 +224,38 @@ export class Editor {
     void this.loadFonts();
     this.syncPaper();
     requestAnimationFrame(() => { if (!this.closing) this.strip.update(); });
+  }
+
+  /** Type the work's new name right in the top bar: Enter or tapping elsewhere keeps it, Escape does not. */
+  private editName(): void {
+    const old = this.meta.name;
+    const input = h("input", { class: "work-name-input", attrs: { type: "text", maxlength: "60", "aria-label": t("workName") }, data: { field: "work-name" } });
+    input.value = old;
+    this.nameBtn.replaceWith(input);
+    let done = false;
+    const finish = (keep: boolean) => {
+      if (done) return;
+      done = true;
+      const name = input.value.trim();
+      input.replaceWith(this.nameBtn);
+      if (!keep || !name || name === old) return;
+      this.showName(name);
+      this.store.renameWork(this.meta.id, name)
+        .then((m) => { this.meta = { ...this.meta, name: m.name }; })
+        .catch((err: unknown) => { console.error(err); toast(t("actionFailed")); this.showName(old); });
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
+  }
+
+  private showName(name: string): void {
+    this.meta = { ...this.meta, name };
+    (this.nameBtn.querySelector("span") as HTMLElement).textContent = name;
   }
 
   private readonly onKey = (e: KeyboardEvent) => {
@@ -859,7 +897,7 @@ export class Editor {
     if (moving) this.setMode("move");
   }
 
-  /** A new transparent layer above the active one, or a copy of `copyOf` above it. */
+  /** A new layer filled with white above the active one (its colour can be changed or removed), or a copy of `copyOf` above it. */
   private addLayer(copyOf?: LayerId): void {
     const s = derive(this.page);
     if (s.order.length >= this.maxLayers()) { toast(t("layerFull", { n: this.maxLayers() })); return; }
@@ -870,7 +908,7 @@ export class Editor {
     doc.layers[id] = props;
     this.doc = doc;
     const at = s.order.indexOf(copyOf ?? this.page.active) + 1;
-    this.setPage({ ...commit(this.page, { type: "add", id, index: at, ...(copyOf ? { copyOf } : {}) }), active: id });
+    this.setPage({ ...commit(this.page, { type: "add", id, index: at, ...(copyOf ? { copyOf } : { color: NEW_LAYER_COLOR }) }), active: id });
     this.refresh();
   }
 

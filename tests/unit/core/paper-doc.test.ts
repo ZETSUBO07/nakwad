@@ -5,7 +5,7 @@ import { draw } from "./helpers";
 describe("paper", () => {
   it("matches the layer counts shown in the prototype", () => {
     const counts = Object.fromEntries(PAPER_SIZES.map((p) => [p.id, layersFor(p.w, p.h)]));
-    expect(counts).toEqual({ landscape: 26, portrait: 26, square: 23, padScreen: 16, a4: 11, a5: 23, social: 68 });
+    expect(counts).toEqual({ landscape: 26, portrait: 26, square: 23, a4: 11, a5: 23, social: 68 });
   });
 
   it("explains why a size cannot be used", () => {

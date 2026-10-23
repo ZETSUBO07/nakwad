@@ -90,7 +90,16 @@ body.app .recent .swatch[aria-pressed="true"] { outline: 3px solid var(--paper);
 .ebar { display: flex; align-items: center; gap: 8px; min-width: 0;
   padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left));
   background: var(--panel); border-bottom: 1px solid var(--line); }
-.work-name { margin: 0 4px; font-family: var(--display); font-weight: 600; font-size: 1.05rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+.work-title { margin: 0; min-width: 0; flex: 0 1 auto; display: flex; font-size: 1.05rem; }
+body.app .work-name { min-width: 0; max-width: 100%; padding: 0 8px; background: transparent; border-color: transparent; cursor: text;
+  font-family: var(--display); font-weight: 600; font-size: inherit; }
+body.app .work-name:hover { border-color: var(--line); }
+.work-name span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.work-name-input, .lname-input { font: inherit; color: var(--paper); background: var(--night); border: 1px solid var(--ink-red); border-radius: 8px;
+  padding: 0 8px; min-width: 0; user-select: text; -webkit-user-select: text; }
+.work-name-input { width: min(320px, 40vw); min-height: 40px; font-family: var(--display); font-weight: 600; font-size: 1.05rem; }
+.lname-input { flex: 1; width: 100%; min-height: 34px; font-weight: 600; font-size: .9rem; }
+.lrow.active .lname b { cursor: text; }
 .save-pill { color: var(--muted); font-size: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .save-pill[data-state="error"] { color: var(--warn); }
 .spacer { flex: 1; }
