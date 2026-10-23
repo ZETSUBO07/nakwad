@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+import { th } from "./src/i18n/th";
 
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string };
 
@@ -66,7 +67,50 @@ export default defineConfig({
   },
   plugins: [
     securityMeta(),
-    // installed now, switched on in milestone M7 (offline, install, update prompt)
-    VitePWA({ disable: true, injectRegister: false }),
+    // M7: install, offline, and new versions that take over the next time the app opens
+    VitePWA({
+      injectRegister: false, // src/ui/offline.ts registers it, and decides when a new version takes over
+      registerType: "prompt",
+      includeManifestIcons: false, // the icons are in globPatterns already
+      manifest: {
+        id: "/nakwad/",
+        name: th.appName,
+        short_name: th.appName,
+        description: th.appDescription,
+        lang: "th",
+        dir: "ltr",
+        start_url: "/nakwad/",
+        scope: "/nakwad/",
+        display: "fullscreen",
+        display_override: ["fullscreen", "standalone"],
+        orientation: "any",
+        background_color: "#121318",
+        theme_color: "#121318",
+        categories: ["graphics", "art", "productivity"],
+        icons: [
+          { src: "icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "icons/icon-maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+          { src: "icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "icons/icon-monochrome-96.png", sizes: "96x96", type: "image/png", purpose: "monochrome" },
+          { src: "icons/icon-monochrome-512.png", sizes: "512x512", type: "image/png", purpose: "monochrome" },
+        ],
+      },
+      workbox: {
+        // every app file, plus the fonts of the interface; the text tool's fonts are kept the first time they are used
+        globPatterns: ["**/*.{html,js,css,png,svg,webmanifest}", "assets/{mali,anuphan,sriracha,noto-sans-thai}-*.woff2"],
+        globIgnores: ["**/*.map"],
+        navigateFallback: "/nakwad/index.html",
+        navigateFallbackDenylist: [/\/lab\.html$/],
+        cleanupOutdatedCaches: true,
+        skipWaiting: false,
+        clientsClaim: false,
+        runtimeCaching: [{
+          urlPattern: ({ url }) => url.pathname.startsWith("/nakwad/assets/") && /\.(woff2?|ttf|otf)$/.test(url.pathname),
+          handler: "CacheFirst",
+          options: { cacheName: "nakwad-fonts", expiration: { maxEntries: 120 } },
+        }],
+      },
+    }),
   ],
 });
