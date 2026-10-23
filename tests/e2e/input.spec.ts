@@ -140,3 +140,41 @@ test("one finger draws only in finger-draw mode; palms and a hand resting after 
   expect(await lab(page, (l) => l.strokes())).toBe(2);
   expect(errors).toEqual([]);
 });
+
+test("a pen the tablet lets go of without a lift ends its stroke, and the next stroke draws", async ({ page }) => {
+  const { errors, cdp } = await open(page);
+  await page.evaluate(() => document.addEventListener("pointerdown", (e) => { (window as unknown as { lastPtr: number }).lastPtr = e.pointerId; }, true));
+  const f = await lab(page, (l) => l.frame());
+  const a: Vec = [f.center[0] - 100, f.center[1]], b: Vec = [f.center[0] + 100, f.center[1]];
+  const ev = (type: "mouseMoved" | "mousePressed" | "mouseReleased", [x, y]: Vec, buttons: number) =>
+    cdp.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons, clickCount: 1, pointerType: "pen", force: 0.6 });
+  await ev("mousePressed", a, 1);
+  for (const p of steps(a, b).slice(1)) await ev("mouseMoved", p, 1);
+  // the browser drops the pointer without a pointerup
+  await page.evaluate(() => { const w = window as unknown as { lastPtr: number }; for (const el of document.querySelectorAll("*")) if (el.hasPointerCapture(w.lastPtr)) el.releasePointerCapture(w.lastPtr); });
+  await ev("mouseMoved", b, 1); // the browser applies the release with the next event
+  await expect.poll(() => lab(page, (l) => l.strokes())).toBe(1);
+  await ev("mouseReleased", b, 0);
+  await penLine(cdp, [a[0], a[1] + 60], [b[0], b[1] + 60]);
+  expect(await lab(page, (l) => l.strokes())).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test("with fingers drawing, a palm that touches first does not stop the pen", async ({ page }) => {
+  const { errors, cdp } = await open(page);
+  await page.locator('[data-action="finger-draw"]').click();
+  expect(await lab(page, (l) => l.fingerMode())).toBe("draw");
+  const f = await lab(page, (l) => l.frame());
+  // the side of the hand lands first (small enough not to count as a palm) and slides
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: f.center[0] + 150, y: f.center[1] + 120, id: 0, radiusX: 8, radiusY: 8 }] });
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: f.center[0] + 160, y: f.center[1] + 125, id: 0, radiusX: 8, radiusY: 8 }] });
+  await penLine(cdp, [f.center[0] - 100, f.center[1] - 50], [f.center[0] + 100, f.center[1] - 50]);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  expect(await lab(page, (l) => l.strokes())).toBe(1);
+  // the line kept is the pen's, not the hand's
+  const pts = (await lab(page, (l) => l.lastStroke()))!;
+  const v = await lab(page, (l) => l.view());
+  const [x0, y0] = toPaper(v, f, [f.center[0] - 100, f.center[1] - 50]);
+  expect(Math.hypot(pts[0]![0] - x0, pts[0]![1] - y0)).toBeLessThan(5);
+  expect(errors).toEqual([]);
+});

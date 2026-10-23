@@ -84,7 +84,8 @@ export function applyAction(s: PageState, a: Action): void {
     case "add": {
       const at = Math.max(0, Math.min(a.index, s.order.length));
       s.order.splice(at, 0, a.id);
-      s.layers[a.id] = a.copyOf ? [...(s.layers[a.copyOf] ?? [])] : a.image ? [a.image] : a.text ? [{ kind: "text", ...a.text }] : [];
+      s.layers[a.id] = a.copyOf ? [...(s.layers[a.copyOf] ?? [])] : a.image ? [a.image] : a.text ? [{ kind: "text", ...a.text }]
+        : a.color ? [{ kind: "bg", color: a.color, holes: [] }] : [];
       return;
     }
     case "del":

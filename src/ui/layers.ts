@@ -38,7 +38,9 @@ const pickerValue = (c: string | null) => (!c ? "none" : c === PAPER_PRESET_COLO
 const fromPicker = (v: string) => (v === "none" ? null : v === "white" ? PAPER_PRESET_COLORS.white : v === "cream" ? PAPER_PRESET_COLORS.cream : v);
 const colorOf = (s: PageState, id: LayerId) => { const first = (s.layers[id] ?? [])[0]; return first?.kind === "bg" ? first.color : null; };
 
-type Press = { id: number; layer: LayerId; row: HTMLElement; x0: number; y0: number; y: number; timer: number; mode: "wait" | "scroll" | "menu" | "drag"; scroll0: number };
+type Press = { id: number; layer: LayerId; row: HTMLElement; x0: number; y0: number; y: number; timer: number; mode: "wait" | "scroll" | "menu" | "drag"; scroll0: number;
+  /** the press began on the name of the layer already chosen: a tap there edits the name */
+  onName: boolean };
 
 /**
  * The layer panel: rows top to bottom, tap to choose, eye to hide, colour circle for the layer
@@ -150,11 +152,12 @@ export class LayersPanel {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const target = e.target as HTMLElement, row = target.closest<HTMLElement>(".lrow");
     if (!row?.dataset.layer || this.press) return;
-    // buttons inside the row do their own thing
-    if (target.closest("button")) return;
+    // buttons inside the row do their own thing, and so does a name being typed
+    if (target.closest("button, input")) return;
     e.preventDefault();
     this.list.setPointerCapture(e.pointerId);
-    const p: Press = { id: e.pointerId, layer: row.dataset.layer, row, x0: e.clientX, y0: e.clientY, y: e.clientY, timer: 0, mode: "wait", scroll0: this.list.scrollTop };
+    const p: Press = { id: e.pointerId, layer: row.dataset.layer, row, x0: e.clientX, y0: e.clientY, y: e.clientY, timer: 0, mode: "wait", scroll0: this.list.scrollTop,
+      onName: !!target.closest(".lname b") && row.classList.contains("active") };
     this.press = p;
     if (target.closest(".lhandle")) { this.startDrag(p); return; }
     p.timer = window.setTimeout(() => { if (this.press === p && p.mode === "wait") { p.mode = "menu"; this.openMenu(p.layer, row); } }, LONG_PRESS_MS);
@@ -177,7 +180,10 @@ export class LayersPanel {
     if (!p || e.pointerId !== p.id) return;
     clearTimeout(p.timer);
     this.press = null;
-    if (p.mode === "wait" && e.type === "pointerup") this.host.select(p.layer);
+    if (p.mode === "wait" && e.type === "pointerup") {
+      const name = p.onName ? p.row.querySelector<HTMLElement>(".lname b") : null;
+      if (name) this.editName(p.layer, name); else this.host.select(p.layer);
+    }
     if (p.mode === "drag") this.endDrag(p, e.type === "pointerup");
   };
 
@@ -292,6 +298,30 @@ export class LayersPanel {
   }
 
   closePop(): void { this.pop?.remove(); this.pop = null; }
+
+  /** Type the new name right in the row: Enter or tapping elsewhere keeps it, Escape does not. */
+  private editName(id: LayerId, name: HTMLElement): void {
+    const old = this.host.props()[id]?.name ?? "";
+    const input = h("input", { class: "lname-input", attrs: { type: "text", maxlength: "60", "aria-label": t("layerName") }, data: { field: "layer-name" } });
+    input.value = old;
+    name.replaceWith(input);
+    let done = false;
+    const finish = (keep: boolean) => {
+      if (done) return;
+      done = true;
+      const v = input.value.trim();
+      if (keep && v && v !== old) this.host.setProps(id, { name: v }, true);
+      else input.replaceWith(name);
+    };
+    input.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") { e.preventDefault(); finish(true); }
+      else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+    });
+    input.addEventListener("blur", () => finish(true));
+    input.focus();
+    input.select();
+  }
 
   private rename(id: LayerId): void {
     const input = h("input", { class: "text-input", attrs: { type: "text", maxlength: "60", "aria-label": t("layerName") } });

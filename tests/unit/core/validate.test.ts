@@ -5,6 +5,7 @@ import { draw, stroke, textData } from "./helpers";
 const fullDoc = (): WorkDoc => {
   const doc = newWork({ layerName: "Layer 1" });
   doc.layers.L2 = { name: "Text", visible: true, opacity: 0.5 };
+  doc.layers.L3 = { name: "White", visible: true, opacity: 1 };
   let p = doc.pages[0]!;
   const actions: Action[] = [
     draw("L1", stroke("pencil", { mask: { pts: [[0, 0], [10, 0], [10, 10]], inv: false }, vs: 0.4 })),
@@ -22,6 +23,7 @@ const fullDoc = (): WorkDoc => {
     { type: "clear", layer: "L1" },
     { type: "textflat", layer: "L2", tid: "T1", img: "I2", w: 10, h: 10 },
     { type: "del", id: "L2" },
+    { type: "add", id: "L3", index: 1, color: "#ffffff" },
   ];
   for (const a of actions) p = commit(p, a);
   p.base.layers.L1 = [{ kind: "bg", color: "#ffffff", holes: [stroke("eraserall")] }, { kind: "group", items: [stroke()], opacity: 1, m: [1, 0, 0], src: [100, 100] }, { kind: "image", img: "I3", x: 0, y: 0, w: 5, h: 5, opacity: 1 }];
@@ -134,6 +136,7 @@ describe("validateDoc: every rule", () => {
     ["add copy id", { type: "add", id: "L5", index: 0, copyOf: "../x" }],
     ["add picture", { type: "add", id: "L5", index: 0, image: { kind: "stroke" } }],
     ["add text", { type: "add", id: "L5", index: 0, text: { ...T, color: 1 } }],
+    ["add colour", { type: "add", id: "L5", index: 0, color: "white" }],
     ["delete", { type: "del", id: 7 }],
     ["move", { type: "move", id: "L1", to: 1.5 }],
     ["merge", { type: "merge", id: "L1", into: "L2", alpha: 2 }],

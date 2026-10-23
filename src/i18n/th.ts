@@ -78,7 +78,6 @@ export const th = {
   paper_landscape: "แนวนอน",
   paper_portrait: "แนวตั้ง",
   paper_square: "จัตุรัส",
-  paper_padScreen: "เต็มจอ Pad 6S Pro",
   paper_a4: "A4 สำหรับพิมพ์",
   paper_a5: "A5 สำหรับพิมพ์",
   paper_social: "โพสต์โซเชียล",
