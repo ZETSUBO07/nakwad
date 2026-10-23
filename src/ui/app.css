@@ -253,3 +253,31 @@ body.app .fontlist button[aria-checked="true"] { background: var(--sel); border-
 .tgrip.rotate { left: calc(50% - 13px); top: -62px; cursor: grab; background: var(--ink-red); }
 .tstem { position: absolute; left: calc(50% - 1px); top: -36px; width: 2px; height: 36px; background: var(--ink-red); pointer-events: none; }
 body.app .frame-done { position: absolute; left: 50%; bottom: -58px; transform: translateX(-50%); min-width: 72px; }
+
+/* ---------- pages, paper, export ---------- */
+.pagestrip { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.pchips { flex: 0 1 auto; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding: 2px; scrollbar-width: thin; }
+body.app .pchip { flex: none; height: 44px; padding: 0 8px 0 4px; gap: 6px; font-size: .82rem; font-variant-numeric: tabular-nums; }
+body.app .pchip[aria-selected="true"] { background: var(--sel); border-color: var(--ink-red); }
+.pchip canvas { display: block; border-radius: 2px; box-shadow: 0 0 0 1px var(--line); }
+body.app .pagestrip .icon-btn { background: transparent; border-color: transparent; }
+.paper-dot { width: 14px; height: 14px; }
+.anchor { display: grid; grid-template-columns: repeat(3, 44px); gap: 4px; }
+body.app .anchor button { min-width: 44px; padding: 0; }
+body.app .anchor button[aria-pressed="true"] { background: var(--ink-red); border-color: var(--ink-red); }
+.scales { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+body.app .scales button { font-variant-numeric: tabular-nums; font-size: .85rem; }
+body.app .scales button[aria-checked="true"] { background: var(--sel); border-color: var(--ink-red); }
+.xrow.name .text-input { flex: 1; min-width: 160px; width: auto; }
+.check { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: .92rem; }
+.check input { width: 22px; height: 22px; accent-color: var(--ink-red); }
+.xpreview { display: block; max-width: 100%; max-height: 32vh; margin: 0 auto; border-radius: 6px; background: repeating-conic-gradient(#e4e6ec 0 25%, #fff 0 50%) 50% / 16px 16px; }
+.xinfo { margin: 0; color: var(--muted); font-size: .86rem; font-variant-numeric: tabular-nums; }
+#export .sheet, #paper .sheet { max-height: calc(100dvh - 32px); overflow-y: auto; }
+/* narrow screens: the top bar takes two rows, the pages get the second */
+@media (max-width: 900px) {
+  .ebar { flex-wrap: wrap; }
+  .pagestrip { order: 10; flex: 1 1 60%; }
+  .ebar .save-pill { order: 11; }
+  .ebar .bar-btn span { display: none; }
+}
