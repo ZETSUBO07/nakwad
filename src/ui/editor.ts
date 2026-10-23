@@ -1,7 +1,7 @@
-import { BRUSHES, LIMITS, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, invert, layersFor, mul, newPage, nextId, paperFill, redo, replaceLast, undo, validActive, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
+import { BRUSHES, LIMITS, allMask, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, inMask, invert, invertMask, layersFor, maskBounds, mul, newPage, nextId, paperFill, rectMask, redo, replaceLast, shiftMask, thinOutline, undo, usableMask, validActive, type DrawEntry, type Mask, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
-import { PageRenderer, drawText, fitScale, hitText, makeCanvas, ctx2d, measureText, onCanvasRestored, targetDpr } from "../render";
+import { PageRenderer, clipTo, drawText, fitScale, hitText, makeCanvas, ctx2d, measureText, onCanvasRestored, targetDpr } from "../render";
 import { AutoSaver, StorageError, acquireWorkLock, requestPersistence, type SaveStatus, type Store, type WorkMeta } from "../storage";
 import type { Area } from "./dock";
 import { button, h } from "./dom";
@@ -9,6 +9,8 @@ import { ensureFont, ensureFonts, loadImportedFonts } from "./fonts";
 import { LayersPanel } from "./layers";
 import { TextSession, type TextTarget } from "./textTool";
 import { TransformFrame } from "./transform";
+import { SelectionOutline } from "./selection";
+import type { MenuItem } from "./toolbar";
 import { openExport } from "./exporter";
 import { PageStrip } from "./pages";
 import { askNewPage, openPaperDialog } from "./paperDialog";
@@ -71,7 +73,15 @@ export class Editor {
   /** the layer whose colour is being dragged in the colour wheel (one undo step for the drag) */
   private bgLive: LayerId | null = null;
   private panelOpen = false;
-  private mode: "draw" | "text" | "move" = "draw";
+  private mode: "draw" | "text" | "move" | "select" = "draw";
+  /** the selection (paper pixels); strokes are limited to it while it exists */
+  private sel: Mask | null = null;
+  private selShape: "rect" | "lasso" = "rect";
+  /** a selection being drawn, or the selected pixels being dragged */
+  private selDrag: { kind: "new"; pts: [number, number][] } | { kind: "move"; start: [number, number]; dx: number; dy: number; layer: LayerId } | null = null;
+  /** what the dragged selection looks like (shown, not kept yet) */
+  private selLive: DrawEntry | null = null;
+  private readonly outline = new SelectionOutline();
   /** the move / scale / turn frame: its layer, what has been kept so far, and the drag being shown */
   private frameBox: { frame: TransformFrame; layer: LayerId; kept: Mat | null; live: Mat | null } | null = null;
   private readonly fileIn: HTMLInputElement;
@@ -128,9 +138,11 @@ export class Editor {
       textMode: () => this.mode === "text",
       toggleMove: () => this.setMode(this.mode === "move" ? "draw" : "move"),
       moveMode: () => this.mode === "move",
+      selectMode: () => this.mode === "select",
+      selectItems: () => this.selectItems(),
       sizePreview: (show) => this.sizePreview(show),
     });
-    this.work = h("div", { class: "work" }, this.desk, this.zoomBtn, this.toolbar.el);
+    this.work = h("div", { class: "work" }, this.desk, this.outline.el, this.zoomBtn, this.toolbar.el);
     this.panel = new LayersPanel({
       state: () => derive(this.page),
       props: () => this.doc.layers,
@@ -188,7 +200,7 @@ export class Editor {
       strokeStart: (p, kind) => this.strokeStart(p, kind === "pen"),
       strokeMove: (pts, guess) => this.strokeMove(pts, guess),
       strokeEnd: () => this.strokeEnd(),
-      strokeCancel: () => { this.live = null; this.predicted = []; this.draw(); },
+      strokeCancel: () => { this.live = null; this.predicted = []; this.selDrag = null; this.selLive = null; this.showSel(); this.draw(); },
       undo: () => this.history(undo),
       redo: () => this.history(redo),
       fit: () => this.setView(IDENTITY, true),
@@ -215,6 +227,10 @@ export class Editor {
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       if (k === "z") { e.preventDefault(); this.history(e.shiftKey ? redo : undo); }
       else if (k === "y") { e.preventDefault(); this.history(redo); }
+      else if (k === "a") { e.preventDefault(); this.selectAll(); }
+      else if (k === "d") { e.preventDefault(); this.setSel(null); }
+      else if (k === "i" && e.shiftKey) { e.preventDefault(); if (this.sel) this.setSel(invertMask(this.sel)); }
+      else if (k === "j") { e.preventDefault(); void this.copySelection(false); }
       return;
     }
     if (e.altKey || e.metaKey) return;
@@ -223,6 +239,9 @@ export class Editor {
     else if (k === "t") this.setMode(this.mode === "text" ? "draw" : "text");
     else if (k === "v") this.setMode(this.mode === "move" ? "draw" : "move");
     else if ((k === "enter" || k === "escape") && this.mode === "move") this.setMode("draw");
+    else if (k === "s") this.setMode(this.mode === "select" ? "draw" : "select");
+    else if (k === "escape" && this.sel) this.setSel(null);
+    else if ((k === "delete" || k === "backspace") && this.sel) { e.preventDefault(); this.deleteSelection(); }
     else if (k === "[" || k === "]") this.toolbar.sizeBy(k === "]" ? 2 : -2);
   };
 
@@ -277,6 +296,7 @@ export class Editor {
     this.canvas.style.height = `${s.h * this.fit}px`;
     this.resolution(true);
     this.place();
+    this.showSel();
     this.draw();
   }
 
@@ -301,13 +321,14 @@ export class Editor {
     this.place();
     this.text?.place();
     this.frameBox?.frame.place();
+    this.showSel();
     if (settled) { this.resolution(false); this.draw(); }
   }
 
   private draw(): void {
     const entry = this.live && this.predicted.length ? { ...this.live, points: [...this.live.points, ...this.predicted] } : this.live;
-    const fb = this.frameBox;
-    this.renderer.composite(this.out, this.doc.paper, entry ? { kind: "draw", layer: this.page.active, entry } : fb?.live ? { kind: "move", layer: fb.layer, m: fb.live } : undefined);
+    const fb = this.frameBox, drawn = entry ?? this.selLive;
+    this.renderer.composite(this.out, this.doc.paper, drawn ? { kind: "draw", layer: this.page.active, entry: drawn } : fb?.live ? { kind: "move", layer: fb.layer, m: fb.live } : undefined);
     this.toolbar.undoBtn.disabled = !canUndo(this.page);
     this.toolbar.redoBtn.disabled = !canRedo(this.page);
   }
@@ -345,6 +366,7 @@ export class Editor {
     this.panel.closeMenu();
     if (this.mode === "text") { this.textTap(p); return; }
     if (this.mode === "move") return; // outside the frame: nothing to draw
+    if (this.mode === "select") { this.selectStart(p); return; }
     if (!this.canChange(this.page.active, true)) return;
     const tool = this.toolbar.tool;
     this.stab = new Stabilizer(this.prefs.stab);
@@ -354,12 +376,15 @@ export class Editor {
       kind: "stroke", brush: tool.brush, color: tool.color, size: tool.size, opacity: tool.op / 100,
       // the stroke keeps the width the user sees on screen, whatever the zoom
       pressure, seed: (Math.random() * 1e9) | 0, vs: this.fit * this.view.s, points: [this.stab.start(p)],
+      // with a selection, drawing (and erasing) stays inside it
+      ...(this.sel ? { mask: this.sel } : {}),
     };
     this.predicted = [];
     this.draw();
   }
 
   private strokeMove(points: Point[], guess: Point[]): void {
+    if (this.selDrag) { const last = points[points.length - 1]; if (last) this.selectMove(points, last); return; }
     if (!this.live) return;
     for (const p of points) this.live.points.push(this.stab.add(p));
     const last = points[points.length - 1];
@@ -369,6 +394,7 @@ export class Editor {
   }
 
   private strokeEnd(): void {
+    if (this.selDrag) { this.selectEnd(); return; }
     if (!this.live) return;
     this.live.points.push(...this.stab.finish());
     const entry = this.live, layer = this.page.active;
@@ -398,16 +424,148 @@ export class Editor {
     if (!this.closing) { this.renderer.setState(this.shown(), this.doc.layers); this.draw(); this.panel.thumbs(); }
   }
 
-  private setMode(m: "draw" | "text" | "move"): void {
+  private setMode(m: "draw" | "text" | "move" | "select"): void {
     if (m === this.mode) return;
     this.text?.finish();
     this.closeFrame();
     this.mode = m;
     this.desk.classList.toggle("texting", m === "text");
+    this.desk.classList.toggle("selecting", m === "select");
     this.ring.hidden = true;
     if (m === "text") toast(t("textHint"));
+    if (m === "select") toast(t("selectHint"));
     if (m === "move" && !this.openFrame()) this.mode = "draw";
     this.toolbar.sync();
+  }
+
+  // ---------- selection ----------
+
+  private selectItems(): MenuItem[] {
+    const has = !!this.sel, sep = { key: "selectTool", icon: "select", enabled: false, data: "-", act: () => undefined } as const;
+    const shape = (v: "rect" | "lasso") => () => { this.selShape = v; this.setMode("select"); this.toolbar.sync(); };
+    return [
+      { key: "selectRect", icon: "rect", enabled: true, checked: this.mode === "select" && this.selShape === "rect", kbd: "S", data: "rect", act: shape("rect") },
+      { key: "selectLasso", icon: "lasso", enabled: true, checked: this.mode === "select" && this.selShape === "lasso", data: "lasso", act: shape("lasso") },
+      sep,
+      { key: "selectAll", icon: "selectAll", enabled: true, kbd: "Ctrl+A", data: "all", act: () => this.selectAll() },
+      { key: "selectInvert", icon: "invert", enabled: has, kbd: "Ctrl+Shift+I", data: "invert", act: () => { if (this.sel) this.setSel(invertMask(this.sel)); } },
+      { key: "selectNone", icon: "deselect", enabled: has, kbd: "Ctrl+D", data: "none", act: () => this.setSel(null) },
+      sep,
+      { key: "selectCopy", icon: "copy", enabled: has, kbd: "Ctrl+J", data: "copy", act: () => void this.copySelection(false) },
+      { key: "selectCut", icon: "cut", enabled: has, data: "cut", act: () => void this.copySelection(true) },
+      { key: "selectDelete", icon: "trash", enabled: has, kbd: "Delete", data: "delete", act: () => this.deleteSelection() },
+    ];
+  }
+
+  private setSel(m: Mask | null): void {
+    this.sel = m;
+    this.showSel();
+  }
+
+  private selectAll(): void {
+    const s = derive(this.page);
+    this.setSel(allMask(s.w, s.h));
+  }
+
+  /** Draw the outline: the selection, the one being drawn, or where the dragged pixels are going. */
+  private showSel(): void {
+    const d = this.selDrag;
+    let m = this.sel, closed = true;
+    if (d?.kind === "new") {
+      const a = d.pts[0], b = d.pts[d.pts.length - 1];
+      m = this.selShape === "rect" && a && b ? rectMask(a[0], a[1], b[0], b[1]) : { pts: d.pts, inv: false };
+      closed = this.selShape === "rect";
+    } else if (d?.kind === "move" && m) m = shiftMask(m, d.dx, d.dy);
+    this.outline.show(m, this.frame(), this.view, this.work.getBoundingClientRect(), closed);
+  }
+
+  /** Press with the select tool: inside the selection drags its pixels, elsewhere starts a new selection. */
+  private selectStart(p: Point): void {
+    const layer = this.page.active;
+    if (this.sel && inMask(this.sel, p[0], p[1])) {
+      if (!this.canChange(layer, true)) return;
+      this.renderer.prepareStroke(layer);
+      this.selDrag = { kind: "move", start: [p[0], p[1]], dx: 0, dy: 0, layer };
+      return;
+    }
+    this.selDrag = { kind: "new", pts: [[p[0], p[1]]] };
+    this.showSel();
+  }
+
+  private selectMove(points: Point[], last: Point): void {
+    const d = this.selDrag;
+    if (!d) return;
+    if (d.kind === "new") {
+      if (this.selShape === "rect") d.pts = [d.pts[0] as [number, number], [last[0], last[1]]];
+      else for (const p of points) d.pts.push([p[0], p[1]]);
+    } else if (this.sel) {
+      d.dx = last[0] - d.start[0];
+      d.dy = last[1] - d.start[1];
+      this.selLive = { kind: "selmove", mask: this.sel, dx: d.dx, dy: d.dy };
+      this.redraw();
+    }
+    this.showSel();
+  }
+
+  private selectEnd(): void {
+    const d = this.selDrag;
+    this.selDrag = null;
+    this.selLive = null;
+    if (!d) return;
+    if (d.kind === "new") {
+      const a = d.pts[0], b = d.pts[d.pts.length - 1];
+      const m: Mask = this.selShape === "rect" && a && b ? rectMask(a[0], a[1], b[0], b[1]) : { pts: thinOutline(d.pts), inv: false };
+      // a tap (or a tiny outline) clears the selection
+      this.setSel(usableMask(m) ? m : null);
+      return;
+    }
+    if (this.sel && (Math.abs(d.dx) > 0.5 || Math.abs(d.dy) > 0.5)) {
+      const entry: DrawEntry = { kind: "selmove", mask: this.sel, dx: d.dx, dy: d.dy };
+      this.sel = shiftMask(this.sel, d.dx, d.dy);
+      this.act({ type: "draw", layer: d.layer, entry });
+    } else this.draw();
+    this.showSel();
+  }
+
+  private deleteSelection(): void {
+    const layer = this.page.active;
+    if (!this.sel || !this.canChange(layer, false)) return;
+    this.act({ type: "draw", layer, entry: { kind: "selerase", mask: this.sel } });
+  }
+
+  /** The selected part of the chosen layer as a picture on a new layer above it; "cut" also removes it (two steps). */
+  private async copySelection(cut: boolean): Promise<void> {
+    const sel = this.sel, layer = this.page.active;
+    if (!sel) return;
+    const s = derive(this.page), b = maskBounds(sel, s.w, s.h);
+    if (!b) { toast(t("selectOutside")); return; }
+    if (s.order.length >= this.maxLayers()) { toast(t("layerFull", { n: this.maxLayers() })); return; }
+    if (cut && !this.canChange(layer, false)) return;
+    try {
+      // this layer alone at the paper's full size, then only what is inside the selection
+      const r = new PageRenderer({ image: (key) => this.images.get(key) });
+      r.setState(s, Object.fromEntries(s.order.map((id) => [id, { name: id, visible: id === layer, opacity: 1 }])), 1);
+      const full = r.flatten();
+      const clipped = makeCanvas(s.w, s.h), cx = ctx2d(clipped);
+      cx.save(); clipTo(cx, sel, 1); cx.drawImage(full, 0, 0); cx.restore();
+      const part = makeCanvas(b.w, b.h);
+      ctx2d(part).drawImage(clipped, b.x, b.y, b.w, b.h, 0, 0, b.w, b.h);
+      const blob = await part.convertToBlob({ type: "image/webp", quality: 0.95 });
+      const doc: WorkDoc = { ...this.doc, next: { ...this.doc.next }, layers: { ...this.doc.layers } };
+      const img = nextId(doc, "image"), id = nextId(doc, "layer"), from = doc.layers[layer];
+      doc.layers[id] = { name: t("selectLayerName", { name: from?.name ?? layer }), visible: true, opacity: from?.opacity ?? 1 };
+      this.doc = doc;
+      this.images.set(img, await createImageBitmap(part));
+      this.pendingImages.set(img, blob);
+      if (cut) this.setPage(commit(this.page, { type: "draw", layer, entry: { kind: "selerase", mask: sel } }));
+      const image: ImageEntry = { kind: "image", img, x: b.x, y: b.y, w: b.w, h: b.h, opacity: 1 };
+      this.setPage({ ...commit(this.page, { type: "add", id, index: s.order.indexOf(layer) + 1, image }), active: id });
+      this.refresh();
+      toast(t(cut ? "selectCutDone" : "selectCopied"));
+    } catch (err) {
+      console.error(err);
+      toast(t("actionFailed"));
+    }
   }
 
   // ---------- move, scale, turn ----------
@@ -593,7 +751,7 @@ export class Editor {
     const s = derive(this.page), active = validActive(s, this.page.active);
     if (active && active !== this.page.active) this.setPage({ ...this.page, active });
     // the paper changed size (resize, or undoing one): lay the view out again
-    if (s.w !== this.laidOut.w || s.h !== this.laidOut.h) { this.view = IDENTITY; this.layout(); this.panel.update(); this.saver.markDirty(); this.stripSoon(); return; }
+    if (s.w !== this.laidOut.w || s.h !== this.laidOut.h) { this.sel = null; this.showSel(); this.view = IDENTITY; this.layout(); this.panel.update(); this.saver.markDirty(); this.stripSoon(); return; }
     this.renderer.setState(this.shown(), this.doc.layers);
     this.draw();
     this.panel.update();
@@ -681,6 +839,7 @@ export class Editor {
   }
 
   private openPageAfterChange(i: number): void {
+    this.sel = null;
     this.doc = { ...this.doc, current: i };
     this.view = IDENTITY;
     this.layout();

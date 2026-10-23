@@ -6,3 +6,4 @@ export * from "./history";
 export * from "./images";
 export * from "./validate";
 export * from "./layers";
+export * from "./selection";

@@ -280,6 +280,22 @@ export const th = {
   exportInfo: "{w} × {h} พิกเซล · {mb} MB",
   exportSave: "บันทึก",
   exportSaved: "บันทึก {file} แล้ว",
+
+  // M6.5c: selection
+  selectTool: "เลือก (S)",
+  selectRect: "สี่เหลี่ยม",
+  selectLasso: "อิสระ",
+  selectAll: "เลือกทั้งหมด",
+  selectInvert: "กลับด้านการเลือก",
+  selectNone: "ยกเลิกการเลือก",
+  selectCopy: "คัดลอกไปเลเยอร์ใหม่",
+  selectCut: "ตัดไปเลเยอร์ใหม่",
+  selectDelete: "ลบส่วนที่เลือก",
+  selectHint: "ลากเพื่อเลือก · ลากในส่วนที่เลือกเพื่อย้าย · วาดตอนนี้จะลงเฉพาะในส่วนที่เลือก",
+  selectOutside: "ส่วนที่เลือกอยู่นอกกระดาษ",
+  selectCopied: "คัดลอกไปไว้ในเลเยอร์ใหม่แล้ว",
+  selectCutDone: "ตัดไปไว้ในเลเยอร์ใหม่แล้ว",
+  selectLayerName: "{name} (ส่วนที่เลือก)",
 } as const;
 
 export type MessageKey = keyof typeof th;

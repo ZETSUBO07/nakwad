@@ -63,6 +63,13 @@ const ICONS = {
   download: ["M12 4v11", "M7 10l5 5 5-5", "M5 20h14"],
   move: ["M12 3v18", "M3 12h18", "M9 6l3-3 3 3", "M9 18l3 3 3-3", "M6 9l-3 3 3 3", "M18 9l3 3-3 3"],
   image: ["M4 5h16v14H4z", "M4 16l5-5 4 4 2-2 5 5", "M15 9h.01"],
+  select: ["M4 4h3", "M10 4h4", "M17 4h3v3", "M20 10v4", "M20 17v3h-3", "M14 20h-4", "M7 20H4v-3", "M4 14v-4", "M4 7V4"],
+  rect: ["M4 6h16v12H4z"],
+  lasso: ["M7 18c-3-1-4-4-3-7 2-5 10-7 14-4 3 2 2 7-3 8-3 .7-6 0-7-1", "M8 15c-2 1-2 4 0 5"],
+  selectAll: ["M4 4h16v16H4z", "M8 8h8v8H8z"],
+  invert: ["M4 4h16v16H4z", "M12 4v16", "M12 8h8", "M12 12h8", "M12 16h8"],
+  deselect: ["M4 4h3", "M17 4h3v3", "M20 17v3h-3", "M7 20H4v-3", "M9 9l6 6", "M15 9l-6 6"],
+  cut: ["M6 7a2 2 0 1 0 0 .01", "M6 17a2 2 0 1 0 0 .01", "M8 8l12 8", "M8 16l12-8"],
 } as const;
 export type IconName = keyof typeof ICONS;
 

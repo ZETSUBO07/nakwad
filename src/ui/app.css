@@ -281,3 +281,14 @@ body.app .scales button[aria-checked="true"] { background: var(--sel); border-co
   .ebar .save-pill { order: 11; }
   .ebar .bar-btn span { display: none; }
 }
+
+/* ---------- selection ---------- */
+.sel-outline { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 6; pointer-events: none; overflow: visible; }
+.sel-outline path { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.sel-outline .ants-light { stroke: #fff; }
+.sel-outline .ants-dark { stroke: #1d2230; stroke-dasharray: 6 6; animation: ants 0.8s linear infinite; }
+@keyframes ants { to { stroke-dashoffset: -12; } }
+@media (prefers-reduced-motion: reduce) { .sel-outline .ants-dark { animation: none; } }
+.editor .desk.selecting { cursor: crosshair; }
+.lmenu kbd { margin-left: auto; padding-left: 12px; font-family: inherit; font-size: .74rem; color: var(--muted); }
+body.app .mi[aria-checked="true"] { background: var(--sel); }
