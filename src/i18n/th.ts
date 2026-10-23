@@ -6,6 +6,7 @@
  */
 export const th = {
   appName: "นักวาดมือฉมัง",
+  appDescription: "แอปวาดรูปสำหรับแท็บเล็ตกับปากกา ใช้ได้แม้ไม่มีเน็ต",
   versionLabel: "เวอร์ชัน {version}",
   openLab: "ลองหัวปากกา",
 
