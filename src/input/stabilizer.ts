@@ -35,11 +35,25 @@ export class Stabilizer {
     return [s[0], s[1], s[2], p[3]];
   }
 
+  /**
+   * Shown while drawing, not kept: the line carried from the smoothed position to where the pen
+   * really is, so smoothing never makes the line trail behind the pen.
+   */
+  tail(steps = 4): Point[] {
+    const s = this.s, r = this.last;
+    if (!s || !r || !this.active) return [];
+    return this.bridge(s, r, steps);
+  }
+
   /** Points that carry the line from the smoothed position to where the pen lifted. */
   finish(steps = 4): Point[] {
     const s = this.s, r = this.last;
     this.s = null;
     if (!s || !r || !this.active) return [];
+    return this.bridge(s, r, steps);
+  }
+
+  private bridge(s: [number, number, number], r: Point, steps: number): Point[] {
     const out: Point[] = [];
     for (let j = 1; j <= steps; j++) {
       const u = j / steps;

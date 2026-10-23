@@ -54,11 +54,14 @@ export const SIZE_SLIDER_MAX = 100;
 export const SWATCHES = ["#1d2230", "#e23b3b", "#f08c1a", "#f2c522", "#2fa65a", "#2f54d6", "#8a3fd1", "#ffffff"] as const;
 
 export const RECENT_COLORS = 5;
+/** Low smoothing by default (spec): the line keeps up with the pen. */
+export const DEFAULT_STAB = 5;
+const PREFS_VERSION = 2;
 const KEY = "nakwad.prefs";
 
 export function defaultPrefs(): Prefs {
   return {
-    lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: 20, font: "bright",
+    lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: DEFAULT_STAB, font: "bright",
     brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null,
     text: { font: "Anuphan", size: 72, align: "left" },
   };
@@ -84,6 +87,8 @@ export function parsePrefs(raw: string | null): Prefs {
   if (v.finger === "pen" || v.finger === "draw") out.finger = v.finger;
   if (v.font === "bright" || v.font === "brush") out.font = v.font;
   out.stab = clampInt(v.stab, 0, 100, out.stab);
+  // settings saved before version 2 hold the old default of 20, which made the line trail the pen
+  if (v.v !== PREFS_VERSION && out.stab === 20) out.stab = DEFAULT_STAB;
   if (typeof v.brush === "string" && (BRUSHES as readonly string[]).includes(v.brush)) out.brush = v.brush as BrushId;
   if (isHexColor(v.color)) out.color = v.color.toLowerCase();
   if (isObj(v.brushes)) {
@@ -121,7 +126,7 @@ export function loadPrefs(s: StorageLike | null = local()): Prefs {
 }
 
 export function savePrefs(p: Prefs, s: StorageLike | null = local()): void {
-  try { s?.setItem(KEY, JSON.stringify(p)); } catch { /* private window or full: settings are optional */ }
+  try { s?.setItem(KEY, JSON.stringify({ ...p, v: PREFS_VERSION })); } catch { /* private window or full: settings are optional */ }
 }
 
 /** Show the chosen font style and hand on the page (CSS reads these classes). */

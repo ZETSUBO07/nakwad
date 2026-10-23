@@ -27,6 +27,21 @@ describe("stabilizer", () => {
     expect(s.finish()).toEqual([]);
   });
 
+  it("the shown tail reaches the pen without changing the smoothing", () => {
+    const s = new Stabilizer(80);
+    s.start([0, 0, 0.5, 0]);
+    s.add([100, 0, 0.5, 16]);
+    const a = s.add([200, 0, 0.5, 32]);
+    const tail = s.tail(4);
+    expect(tail).toHaveLength(4);
+    expect(tail[3]![0]).toBeCloseTo(200);
+    expect(tail[0]![0]).toBeGreaterThan(a[0]);
+    // asking for the tail again changes nothing
+    expect(s.tail(4)).toEqual(tail);
+    expect(s.add([300, 0, 0.5, 48])[0]).toBeGreaterThan(a[0]);
+    expect(new Stabilizer(0).tail()).toEqual([]);
+  });
+
   it("clamps strength and starts on the first point if start was skipped", () => {
     const s = new Stabilizer(500);
     expect(s.add([3, 4, 0.2, 1])).toEqual([3, 4, 0.2, 1]);

@@ -389,8 +389,9 @@ export class Editor {
     for (const p of points) this.live.points.push(this.stab.add(p));
     const last = points[points.length - 1];
     if (last) this.lastPoint = [last[0], last[1]];
-    this.predicted = this.stab.active ? [] : guess;
-    this.redraw();
+    // shown at once (not a frame later): the line up to the pen, plus where the pen is about to be
+    this.predicted = [...this.stab.tail(), ...guess];
+    this.draw();
   }
 
   private strokeEnd(): void {

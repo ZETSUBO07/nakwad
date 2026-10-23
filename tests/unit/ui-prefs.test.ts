@@ -35,6 +35,16 @@ describe("app settings in the browser", () => {
     expect(parsePrefs(JSON.stringify({ hand: "middle", brush: "laser", color: "red", stab: "x" }))).toEqual(defaultPrefs());
   });
 
+  it("the old default smoothing of 20 becomes the new low default; a 20 chosen since is kept", () => {
+    expect(parsePrefs(JSON.stringify({ stab: 20 })).stab).toBe(5);
+    expect(parsePrefs(JSON.stringify({ stab: 35 })).stab).toBe(35);
+    expect(parsePrefs(JSON.stringify({ stab: 20, v: 2 })).stab).toBe(20);
+    const data = new Map<string, string>();
+    const s = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+    savePrefs({ ...defaultPrefs(), stab: 20 }, s);
+    expect(loadPrefs(s).stab).toBe(20);
+  });
+
   it("recent colours: newest first, no repeats, at most five", () => {
     let list: string[] = [];
     for (const c of ["#000001", "#000002", "#000003", "#000001", "#000004", "#000005", "#000006", "nope"]) list = remember(list, c);

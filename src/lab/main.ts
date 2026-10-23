@@ -90,7 +90,7 @@ fingerBtn.dataset.action = "finger-draw";
 const stabLabel = document.createElement("label");
 stabLabel.textContent = t("labStabilizer");
 const stabInput = document.createElement("input");
-stabInput.type = "range"; stabInput.min = "0"; stabInput.max = "100"; stabInput.value = "15";
+stabInput.type = "range"; stabInput.min = "0"; stabInput.max = "100"; stabInput.value = "5";
 stabLabel.append(stabInput);
 const zoomBtn = button("", () => fitView());
 zoomBtn.dataset.action = "zoom";
@@ -179,8 +179,6 @@ function apply(next: Page): void {
   draw();
 }
 
-let raf = 0;
-const redraw = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); };
 let stab = new Stabilizer(0);
 let lastCommitted: StrokeEntry | null = null;
 
@@ -203,9 +201,9 @@ const input = attachInput(desk, {
   strokeMove(points, guess) {
     if (!live) return;
     for (const p of points) live.points.push(stab.add(p));
-    // predictions only help without smoothing; with it they would pull the line ahead of itself
-    predicted = stab.active ? [] : guess;
-    redraw();
+    // the line up to the pen, plus where the pen is about to be, drawn at once
+    predicted = [...stab.tail(), ...guess];
+    draw();
   },
   strokeEnd() {
     if (!live) return;
