@@ -1,4 +1,5 @@
 import { t } from "../i18n";
+import { syncBack } from "./back";
 import { button, h } from "./dom";
 
 export interface DialogHandle {
@@ -17,7 +18,7 @@ export function openDialog(title: string, body: Node[], onClose: () => void, opt
   const el = h("dialog", { class: "dialog", attrs: { "aria-labelledby": heading.id } }, sheet);
   if (opts.id) el.id = opts.id;
   let done = false;
-  const finish = () => { if (done) return; done = true; el.remove(); onClose(); };
+  const finish = () => { if (done) return; done = true; el.remove(); onClose(); syncBack(); };
   const close = () => { if (el.open) el.close(); finish(); };
   closeBtn.addEventListener("click", close);
   el.addEventListener("close", finish);
@@ -25,5 +26,6 @@ export function openDialog(title: string, body: Node[], onClose: () => void, opt
   el.addEventListener("pointerdown", (e) => { if (e.target === el) close(); });
   document.body.append(el);
   el.showModal();
+  syncBack();
   return { el, close };
 }

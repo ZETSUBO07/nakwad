@@ -1,4 +1,4 @@
-import { BRUSHES, isHexColor, isPaperColor, paperSizeProblem, type BrushId } from "../core";
+import { BRUSHES, isEraser, isHexColor, isPaperColor, paperSizeProblem, type BrushId } from "../core";
 import type { FingerMode } from "../input";
 import { isTbState, type TbState } from "./dock";
 
@@ -31,6 +31,12 @@ export interface Prefs {
   toolbar: { land?: TbState; port?: TbState };
   /** layer panel open; null = decide by screen width */
   layersOpen: boolean | null;
+  /** the drawing brush to go back to when the eraser button is tapped again */
+  drawBrush: BrushId;
+  /** which eraser the eraser button (and the pen's side button) uses */
+  eraser: "eraser" | "eraserall";
+  /** the pen's side button was seen once (its tip is shown only the first time) */
+  penButtonSeen: boolean;
   /** when everything was last backed up on this device (ms), null = never */
   lastBackup: number | null;
   /** last text settings, used for the next text box */
@@ -64,7 +70,7 @@ const KEY = "nakwad.prefs";
 export function defaultPrefs(): Prefs {
   return {
     lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: DEFAULT_STAB, font: "bright",
-    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null, lastBackup: null,
+    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null, lastBackup: null, drawBrush: "pen", eraser: "eraser", penButtonSeen: false,
     text: { font: "Anuphan", size: 72, align: "left" },
   };
 }
@@ -100,6 +106,9 @@ export function parsePrefs(raw: string | null): Prefs {
     }
   }
   if (typeof v.layersOpen === "boolean") out.layersOpen = v.layersOpen;
+  if (typeof v.drawBrush === "string" && (BRUSHES as readonly string[]).includes(v.drawBrush) && !isEraser(v.drawBrush as BrushId)) out.drawBrush = v.drawBrush as BrushId;
+  if (v.eraser === "eraser" || v.eraser === "eraserall") out.eraser = v.eraser;
+  if (v.penButtonSeen === true) out.penButtonSeen = true;
   if (typeof v.lastBackup === "number" && Number.isFinite(v.lastBackup) && v.lastBackup > 0) out.lastBackup = v.lastBackup;
   if (isObj(v.text)) {
     const tx = v.text;

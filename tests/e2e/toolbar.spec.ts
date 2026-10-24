@@ -41,9 +41,9 @@ test("pick a brush and a colour, draw, then erase with the 7 key", async ({ page
   await expect(toolbar(page).locator('[data-action="brush"]')).toHaveAttribute("data-brush", "eraser");
   await line(page, 0.5, 0.1, 0.7);
   expect(await pixel(page, 0.4, 0.5)).toEqual([255, 255, 255, 255]);
-  // picking a colour while erasing goes back to drawing
+  // picking a colour while erasing goes back to drawing, with the brush used before
   await toolbar(page).locator('[data-color="#e23b3b"]').click();
-  await expect(toolbar(page).locator('[data-action="brush"]')).toHaveAttribute("data-brush", "pen");
+  await expect(toolbar(page).locator('[data-action="brush"]')).toHaveAttribute("data-brush", "nib");
 });
 
 test("the size shows as a number and as a circle of the real size on the paper", async ({ page }) => {
@@ -194,4 +194,68 @@ test("the line keeps up with the pen while drawing, even with strong smoothing",
   // still pressing: the drawn line already reaches the pen
   expect((await pixel(page, 0.69, 0.5))[0]!).toBeLessThan(100);
   await page.mouse.up();
+});
+
+test("the eraser button: tap to erase, tap again for the brush before; hold to choose the eraser; its own size", async ({ page }) => {
+  await newWork(page);
+  const tb = toolbar(page), eraser = tb.locator('[data-action="eraser"]');
+  await tb.locator('[data-action="brush"]').click();
+  await page.getByTestId("brush-menu").locator('[data-brush="nib"]').click();
+  await tb.locator('[data-field="size"]').fill("24");
+  await line(page);
+  expect((await pixel(page, 0.4, 0.5))[0]!).toBeLessThan(150);
+
+  await eraser.click();
+  await expect(eraser).toHaveAttribute("aria-pressed", "true");
+  await expect(tb.locator('[data-action="brush"]')).toHaveAttribute("data-brush", "eraser");
+  await tb.locator('[data-field="size"]').fill("60");
+  await line(page, 0.5, 0.1, 0.7);
+  expect(await pixel(page, 0.4, 0.5)).toEqual([255, 255, 255, 255]);
+
+  await eraser.click();
+  await expect(eraser).toHaveAttribute("aria-pressed", "false");
+  await expect(tb.locator('[data-action="brush"]')).toHaveAttribute("data-brush", "nib");
+  await expect(tb.locator('[data-field="size-number"]')).toHaveValue("24"); // the brush keeps its size
+  await eraser.click();
+  await expect(tb.locator('[data-field="size-number"]')).toHaveValue("60"); // and the eraser its own
+
+  // press and hold: choose the eraser that also takes the layer colour away
+  const b = (await eraser.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await expect(page.getByTestId("eraser-menu")).toBeVisible({ timeout: 2000 });
+  await page.mouse.up();
+  await expect(page.getByTestId("eraser-menu")).toBeVisible(); // letting go keeps it open
+  await page.getByTestId("eraser-menu").locator('[data-brush="eraserall"]').click();
+  await expect(eraser).toHaveAttribute("data-eraser", "eraserall");
+  await expect(tb.locator('[data-action="brush"]')).toHaveAttribute("data-brush", "eraserall");
+  // the brush button while erasing goes straight back to drawing
+  await tb.locator('[data-action="brush"]').click();
+  await expect(tb.locator('[data-action="brush"]')).toHaveAttribute("data-brush", "nib");
+  await expect(page.getByTestId("brush-menu")).toHaveCount(0);
+});
+
+test("the pen's side button erases while it is held, then the pen draws again; a tip says so the first time", async ({ page }) => {
+  await newWork(page);
+  await toolbar(page).locator('[data-field="size"]').fill("24");
+  await line(page);
+  expect((await pixel(page, 0.4, 0.5))[0]!).toBeLessThan(100);
+  // the eraser is wide enough to clear the line
+  await toolbar(page).locator('[data-action="eraser"]').click();
+  await toolbar(page).locator('[data-field="size"]').fill("60");
+  await toolbar(page).locator('[data-action="eraser"]').click();
+
+  const r = (await page.getByTestId("paper").boundingBox())!;
+  const pen = (type: string, fx: number, buttons: number) => page.locator(".desk").evaluate((el, a) => {
+    el.dispatchEvent(new PointerEvent(a.type, { pointerId: 7, pointerType: "pen", isPrimary: true, bubbles: true, cancelable: true, clientX: a.x, clientY: a.y, buttons: a.buttons, button: a.type === "pointermove" ? -1 : 0, pressure: a.buttons ? 0.5 : 0 }));
+  }, { type, x: r.x + r.width * fx, y: r.y + r.height * 0.5, buttons });
+  await pen("pointerdown", 0.1, 3); // tip + side button
+  for (let i = 1; i <= 12; i++) await pen("pointermove", 0.1 + i * 0.05, 3);
+  await pen("pointerup", 0.7, 0);
+  expect(await pixel(page, 0.4, 0.5)).toEqual([255, 255, 255, 255]);
+  await expect(page.locator(".toast").last()).toContainText(th.penButtonFound);
+  // the tool did not change: the next stroke draws
+  await expect(toolbar(page).locator('[data-action="brush"]')).toHaveAttribute("data-brush", "pen");
+  await line(page, 0.3);
+  expect((await pixel(page, 0.4, 0.3))[0]!).toBeLessThan(100);
 });

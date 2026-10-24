@@ -27,6 +27,8 @@ export interface ToolbarHost {
   toggleMove(): void;
   moveMode(): boolean;
   selectMode(): boolean;
+  /** leave the text, move or select tool for drawing */
+  toDraw(): void;
   /** what the selection menu offers right now */
   selectItems(): MenuItem[];
 }
@@ -44,6 +46,8 @@ export interface MenuItem {
 
 const brushKey = (b: BrushId) => ("brush" + b.charAt(0).toUpperCase() + b.slice(1)) as MessageKey;
 const descKey = (b: BrushId) => (brushKey(b) + "Desc") as MessageKey;
+/** press and hold the eraser button this long to choose the eraser */
+const ERASER_HOLD_MS = 450;
 const orientation = (): "land" | "port" => (innerWidth >= innerHeight ? "land" : "port");
 
 /**
@@ -55,6 +59,8 @@ export class Toolbar {
   private readonly grip: HTMLElement;
   private readonly bubble: HTMLElement;
   private readonly brushBtn: HTMLButtonElement;
+  private readonly eraserBtn: HTMLButtonElement;
+  private eraserHold = 0;
   private readonly textBtn: HTMLButtonElement;
   private readonly moveBtn: HTMLButtonElement;
   private readonly selBtn: HTMLButtonElement;
@@ -79,8 +85,28 @@ export class Toolbar {
     this.bubble = h("span", { class: "bubble-icon" });
     this.grip = h("div", { class: "grip", attrs: { role: "button", tabindex: "0", "aria-label": t("toolbarGrip"), title: t("toolbarGrip") }, data: { action: "grip" } },
       h("span", { class: "dots" }), this.bubble);
-    this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => this.toggleMenu() });
+    // while erasing, the brush button simply goes back to drawing
+    this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => { if (isEraser(host.prefs.brush)) { this.closeMenu(); this.toggleEraser(); } else this.toggleMenu(); } });
     this.brushBtn.setAttribute("aria-haspopup", "menu");
+    // tap: eraser on / back to the brush; press and hold (or right-click): which eraser
+    this.eraserBtn = button({ class: "eraser-btn", data: { action: "eraser" } });
+    this.eraserBtn.setAttribute("aria-haspopup", "menu");
+    this.eraserBtn.addEventListener("pointerdown", (e) => {
+      if (e.pointerType === "mouse" && e.button !== 0) return;
+      clearTimeout(this.eraserHold);
+      this.eraserHold = window.setTimeout(() => { this.eraserHold = -1; this.toggleEraserMenu(); }, ERASER_HOLD_MS);
+    });
+    const cancelHold = () => { if (this.eraserHold > 0) clearTimeout(this.eraserHold); };
+    this.eraserBtn.addEventListener("pointerleave", cancelHold);
+    this.eraserBtn.addEventListener("pointercancel", cancelHold);
+    this.eraserBtn.addEventListener("click", () => {
+      if (this.eraserHold === -1) { this.eraserHold = 0; return; } // the hold opened the menu
+      cancelHold();
+      this.closeMenu();
+      this.toggleEraser();
+    });
+    // right-click with a mouse; a touch long-press also sends this, after the hold already opened the menu
+    this.eraserBtn.addEventListener("contextmenu", (e) => { e.preventDefault(); if (this.eraserHold === -1) return; cancelHold(); this.eraserHold = 0; this.toggleEraserMenu(); });
     this.selBtn = button({ icon: "select", title: t("selectTool"), data: { action: "select" }, onClick: () => this.toggleSelectMenu() });
     this.selBtn.setAttribute("aria-haspopup", "menu");
     this.moveBtn = button({ icon: "move", title: t("moveTool"), data: { action: "move" }, onClick: () => { this.closeMenu(); host.toggleMove(); } });
@@ -118,7 +144,7 @@ export class Toolbar {
 
     this.el = h("div", { class: "tbar", attrs: { role: "toolbar", "aria-label": t("toolbar") }, data: { testid: "toolbar" } },
       this.grip,
-      h("div", { class: "tgroup tools" }, this.brushBtn, this.selBtn, this.moveBtn, this.textBtn),
+      h("div", { class: "tgroup tools" }, this.brushBtn, this.eraserBtn, this.selBtn, this.moveBtn, this.textBtn),
       h("div", { class: "sep fo" }), this.swatchBox,
       h("div", { class: "sep fo" }), sliders,
       h("div", { class: "sep" }), h("div", { class: "tgroup actions" }, this.undoBtn, this.redoBtn, clear));
@@ -137,7 +163,7 @@ export class Toolbar {
     this.offs.push(() => window.removeEventListener("resize", onResize));
     const onDocDown = (e: PointerEvent) => {
       const tgt = e.target as Node;
-      if (this.menu && !this.menu.contains(tgt) && !this.brushBtn.contains(tgt) && !this.selBtn.contains(tgt)) this.closeMenu();
+      if (this.menu && !this.menu.contains(tgt) && !this.brushBtn.contains(tgt) && !this.selBtn.contains(tgt) && !this.eraserBtn.contains(tgt)) this.closeMenu();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") this.closeMenu(); };
     document.addEventListener("pointerdown", onDocDown, true);
@@ -163,8 +189,18 @@ export class Toolbar {
   }
 
   setBrush(b: BrushId): void {
-    this.host.prefs.brush = b;
+    const p = this.host.prefs;
+    p.brush = b;
+    // remember which eraser the button uses, and which brush to go back to
+    if (b === "eraser" || b === "eraserall") p.eraser = b; else p.drawBrush = b;
     this.changed();
+  }
+
+  /** The eraser button: erase with the chosen eraser, or go back to the brush used before. */
+  toggleEraser(): void {
+    const p = this.host.prefs;
+    this.host.toDraw();
+    this.setBrush(isEraser(p.brush) ? p.drawBrush : p.eraser);
   }
 
   setColor(c: string, pickedByHand = false): void {
@@ -172,8 +208,8 @@ export class Toolbar {
     if (!isHexColor(c)) return;
     p.color = c.toLowerCase();
     if (pickedByHand) p.colorRecent = remember(p.colorRecent, c);
-    // choosing a colour while erasing means "draw again"
-    if (isEraser(p.brush)) p.brush = "pen";
+    // choosing a colour while erasing means "draw again" with the brush used before
+    if (isEraser(p.brush)) p.brush = p.drawBrush;
     this.changed();
   }
 
@@ -202,11 +238,18 @@ export class Toolbar {
     this.textBtn.setAttribute("aria-pressed", String(texting));
     this.moveBtn.setAttribute("aria-pressed", String(moving));
     this.selBtn.setAttribute("aria-pressed", String(selecting));
-    this.brushBtn.setAttribute("aria-pressed", String(!texting && !moving && !selecting));
-    this.brushBtn.replaceChildren(icon(tool.brush), icon("caret"));
-    this.brushBtn.title = t("brushCurrent", { name: t(brushKey(tool.brush)) });
+    const drawing = !texting && !moving && !selecting, shown = er ? this.host.prefs.drawBrush : tool.brush;
+    this.brushBtn.setAttribute("aria-pressed", String(drawing && !er));
+    this.brushBtn.replaceChildren(icon(shown), icon("caret"));
+    this.brushBtn.title = t("brushCurrent", { name: t(brushKey(shown)) });
     this.brushBtn.setAttribute("aria-label", this.brushBtn.title);
     this.brushBtn.dataset.brush = tool.brush;
+    const ek = this.host.prefs.eraser;
+    this.eraserBtn.setAttribute("aria-pressed", String(drawing && er));
+    this.eraserBtn.replaceChildren(icon(ek));
+    this.eraserBtn.title = t("eraserButton", { name: t(brushKey(ek)) });
+    this.eraserBtn.setAttribute("aria-label", this.eraserBtn.title);
+    this.eraserBtn.dataset.eraser = ek;
     this.bubble.replaceChildren(icon(tool.brush));
     this.bubble.style.setProperty("--bc", er ? "var(--line)" : tool.color);
     this.syncSlider();
@@ -259,6 +302,24 @@ export class Toolbar {
     this.drawPreviews();
   }
 
+  /** Which eraser the eraser button uses: erase lines only, or everything with the layer colour. */
+  private toggleEraserMenu(): void {
+    const open = this.menu?.dataset.testid === "eraser-menu";
+    this.closeMenu();
+    if (open) return;
+    const p = this.host.prefs;
+    const menu = h("div", { class: "menu lmenu", attrs: { role: "menu", "aria-label": t("eraserChoose") }, data: { testid: "eraser-menu" } });
+    for (const b of ["eraser", "eraserall"] as const) {
+      const o = button({ icon: b, label: t(brushKey(b)), class: "mi", data: { brush: b } });
+      o.setAttribute("role", "menuitemradio");
+      o.setAttribute("aria-checked", String(p.eraser === b));
+      o.append(h("small", { text: t(descKey(b)) }));
+      o.addEventListener("click", () => { this.closeMenu(); this.host.toDraw(); this.setBrush(b); });
+      menu.append(o);
+    }
+    this.popup(menu, this.eraserBtn);
+  }
+
   /** Show a menu beside the button that opened it, towards the middle of the screen. */
   private popup(menu: HTMLElement, anchor: HTMLElement): void {
     this.el.parentElement?.append(menu);
@@ -288,11 +349,15 @@ export class Toolbar {
     this.popup(menu, this.selBtn);
   }
 
+  /** a menu of the toolbar is open */
+  get menuOpen(): boolean { return !!this.menu; }
+
   closeMenu(): void {
     this.menu?.remove();
     this.menu = null;
     this.brushBtn.setAttribute("aria-expanded", "false");
     this.selBtn.setAttribute("aria-expanded", "false");
+    this.eraserBtn.setAttribute("aria-expanded", "false");
   }
 
   /** A short sample stroke of every brush, in the current colour and its own size and strength. */

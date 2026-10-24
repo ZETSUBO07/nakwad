@@ -61,4 +61,11 @@ describe("app settings in the browser", () => {
     expect(loadPrefs(broken)).toEqual(defaultPrefs());
     expect(() => savePrefs(loadPrefs(null), broken)).not.toThrow();
   });
+
+  it("the eraser button remembers its eraser and the brush to go back to; bad values fall back", () => {
+    const p = parsePrefs(JSON.stringify({ drawBrush: "ink", eraser: "eraserall", penButtonSeen: true }));
+    expect([p.drawBrush, p.eraser, p.penButtonSeen]).toEqual(["ink", "eraserall", true]);
+    const bad = parsePrefs(JSON.stringify({ drawBrush: "eraser", eraser: "pen", penButtonSeen: "yes" }));
+    expect([bad.drawBrush, bad.eraser, bad.penButtonSeen]).toEqual(["pen", "eraser", false]);
+  });
 });
