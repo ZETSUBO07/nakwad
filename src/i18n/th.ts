@@ -280,6 +280,36 @@ export const th = {
   exportInfo: "{w} × {h} พิกเซล · {mb} MB",
   exportSave: "บันทึก",
   exportSaved: "บันทึก {file} แล้ว",
+  exportShare: "แชร์",
+
+  // files: save to the device or send with the Android share menu
+  fileReadyTitle: "ไฟล์พร้อมแล้ว",
+  fileReadyInfo: "{file} · {mb} MB",
+  fileReadyInfoKb: "{file} · {kb} KB",
+  fileSave: "บันทึกลงเครื่อง",
+  fileShare: "แชร์",
+  fileShared: "แชร์ {file} แล้ว",
+  fileShareFailed: "แชร์ไม่สำเร็จ ลองบันทึกลงเครื่องแทน",
+
+  // backup (.sketchbook) and restore
+  backupAll: "สำรองทั้งหมด",
+  backupRestore: "นำกลับจากไฟล์",
+  backupWork: "สำรองผลงานนี้",
+  backupLast: "สำรองล่าสุด {date}",
+  backupNever: "ยังไม่เคยสำรอง",
+  backupMaking: "กำลังทำไฟล์สำรอง…",
+  backupNothing: "ยังไม่มีผลงานให้สำรอง",
+  backupRemind: "ไม่ได้สำรองงานมาเกิน {days} วันแล้ว ถ้าเบราว์เซอร์ล้างข้อมูล งานในเครื่องอาจหายได้",
+  backupNow: "สำรองตอนนี้",
+  restoreAskTitle: "นำกลับผลงานจากไฟล์",
+  restoreAsk: "เพิ่มผลงานจาก {file} เข้าคลัง ผลงานที่มีอยู่แล้วจะไม่ถูกแตะ",
+  restoreOk: "นำกลับ",
+  restoreWorking: "กำลังนำกลับ…",
+  restoreDone: "นำกลับ {n} ผลงานแล้ว",
+  restoreSkipped: "ข้าม {n} ผลงานที่เสียหรือมาจากแอปรุ่นใหม่กว่า",
+  restoreNone: "ไม่มีผลงานในไฟล์นี้",
+  restoreBadFile: "ไฟล์นี้ไม่ใช่ไฟล์สำรองของนักวาดมือฉมัง หรือไฟล์เสีย",
+  restoreTooBig: "ไฟล์ใหญ่เกินไป",
 
   // M6.5c: selection
   selectTool: "เลือก (S)",

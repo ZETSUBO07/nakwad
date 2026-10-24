@@ -24,6 +24,11 @@ export default tseslint.config(
     },
   },
   {
+    // code that runs inside the service worker
+    files: ["public/**/*.js"],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     files: ["*.config.{js,ts}", "tests/**/*.ts"],
     languageOptions: { globals: { ...globals.node } },
   },

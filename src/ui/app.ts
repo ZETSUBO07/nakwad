@@ -2,6 +2,7 @@ import { newWork } from "../core";
 import { pseudoMessages, setMessages, t } from "../i18n";
 import { th } from "../i18n/th";
 import { Store } from "../storage";
+import { askRestore, takeSharedFile } from "./backup";
 import { openEditor } from "./editor";
 import { Gallery } from "./gallery";
 import { askNewWork } from "./newWork";
@@ -80,6 +81,9 @@ export async function startApp(root: HTMLElement): Promise<void> {
   }
 
   await showGallery();
+  // a backup file shared to the app from another app (Android share menu)
+  const shared = await takeSharedFile(import.meta.env.BASE_URL).catch((err: unknown) => { console.error(err); return null; });
+  if (shared && store && await askRestore(shared.name)) await gallery.restore(shared);
   // only the built app has a service worker (the dev server reloads by itself)
   if (import.meta.env.PROD) {
     void startOffline(navigator.serviceWorker, {
