@@ -87,6 +87,13 @@ export default defineConfig({
         background_color: "#121318",
         theme_color: "#121318",
         categories: ["graphics", "art", "productivity"],
+        // backup files can be sent to the app with the Android share menu (public/share-target.js keeps them)
+        share_target: {
+          action: "/nakwad/share-target",
+          method: "POST",
+          enctype: "multipart/form-data",
+          params: { files: [{ name: "file", accept: [".sketchbook", "application/octet-stream", "application/zip", "application/x-zip-compressed"] }] },
+        },
         icons: [
           { src: "icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
           { src: "icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
@@ -103,6 +110,7 @@ export default defineConfig({
         navigateFallback: "/nakwad/index.html",
         navigateFallbackDenylist: [/\/lab\.html$/],
         cleanupOutdatedCaches: true,
+        importScripts: ["share-target.js"],
         skipWaiting: false,
         clientsClaim: false,
         runtimeCaching: [{

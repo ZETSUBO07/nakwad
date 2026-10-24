@@ -4,6 +4,7 @@ import { t, type MessageKey } from "../i18n";
 import { PageRenderer } from "../render";
 import { openDialog } from "./dialog";
 import { button, h } from "./dom";
+import { deliverFile, canShareFile, saveFile, shareFile } from "./files";
 import { toast } from "./toast";
 
 export type ExportFormat = "png" | "jpg";
@@ -45,14 +46,6 @@ export function renderForExport(page: Page, props: Record<LayerId, LayerProps>, 
 
 const mime = (f: ExportFormat) => (f === "jpg" ? "image/jpeg" : "image/png");
 
-function download(blob: Blob, file: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = h("a", { attrs: { href: url, download: file } });
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
 
 /** The Export dialog (spec "Export"): PNG or JPG, this page / every page as one zip / the chosen layer, resolution, name. */
 export function openExport(host: ExportHost): void {
@@ -70,6 +63,9 @@ export function openExport(host: ExportHost): void {
   const img = h("img", { class: "xpreview", attrs: { alt: t("exportPreview") }, data: { testid: "export-preview" } });
   const info = h("p", { class: "xinfo", attrs: { "aria-live": "polite" } });
   const save = button({ label: t("exportSave"), class: "primary", data: { action: "export-save" } });
+  // shown where the system share menu takes files (Android Chrome)
+  const share = button({ label: t("exportShare"), data: { action: "export-share" } });
+  share.hidden = !canShareFile(new Blob([], { type: "image/png" }), "x.png");
   let blob: Blob | null = null, url = "", token = 0;
 
   const seg = (box: HTMLElement, items: [string, MessageKey | string][], cur: string, pick: (v: string) => void, disabled: (v: string) => boolean = () => false) => {
@@ -107,7 +103,7 @@ export function openExport(host: ExportHost): void {
   function update(): void {
     sync();
     blob = null;
-    save.disabled = true;
+    save.disabled = share.disabled = true;
     info.textContent = t("exportMaking");
     const mine = ++token;
     setTimeout(async () => {
@@ -120,41 +116,45 @@ export function openExport(host: ExportHost): void {
       url = URL.createObjectURL(b);
       img.src = url;
       info.textContent = t("exportInfo", { w: c.width, h: c.height, mb: (b.size / 1048576).toFixed(1) });
-      save.disabled = false;
+      save.disabled = share.disabled = false;
     }, 20);
   }
 
   trans.addEventListener("change", () => { st.transparent = trans.checked; update(); });
-  save.addEventListener("click", async () => {
+  /** The file to save or share: the preview made already, or every page zipped now. */
+  async function make(): Promise<{ blob: Blob; file: string } | null> {
     const base = cleanFileName(name.value, "sketch");
-    save.disabled = true;
+    if (st.what !== "all") return blob ? { blob, file: `${base}.${st.fmt}` } : null;
+    // every page, each at the chosen resolution (capped by its own size), in one zip
+    const files: Zippable = {};
+    for (const [i, p] of doc.pages.entries()) {
+      const ps = derive(p), opt = scaleOptions(ps.w, ps.h).find((o) => o.key === st.scale);
+      const d = opt?.ok ? opt.d : Math.sqrt(MAX_AREA / (ps.w * ps.h));
+      const c = renderForExport(p, doc.layers, doc.paper, d, { transparent: transparent(), image: host.image });
+      const b = await c.convertToBlob({ type: mime(st.fmt), quality: 0.92 });
+      files[`${base}-${i + 1}.${st.fmt}`] = [new Uint8Array(await b.arrayBuffer()), { level: 0 }];
+    }
+    return { blob: new Blob([zipSync(files)], { type: "application/zip" }), file: `${base}.zip` };
+  }
+
+  async function send(how: "save" | "share"): Promise<void> {
+    save.disabled = share.disabled = true;
     try {
-      if (st.what !== "all") {
-        if (!blob) return;
-        const file = `${base}.${st.fmt}`;
-        download(blob, file);
-        toast(t("exportSaved", { file }));
-        return;
-      }
-      // every page, each at the chosen resolution (capped by its own size), in one zip
-      const files: Zippable = {};
-      for (const [i, p] of doc.pages.entries()) {
-        const ps = derive(p), opt = scaleOptions(ps.w, ps.h).find((o) => o.key === st.scale);
-        const d = opt?.ok ? opt.d : Math.sqrt(MAX_AREA / (ps.w * ps.h));
-        const c = renderForExport(p, doc.layers, doc.paper, d, { transparent: transparent(), image: host.image });
-        const b = await c.convertToBlob({ type: mime(st.fmt), quality: 0.92 });
-        files[`${base}-${i + 1}.${st.fmt}`] = [new Uint8Array(await b.arrayBuffer()), { level: 0 }];
-      }
-      const file = `${base}.zip`;
-      download(new Blob([zipSync(files)], { type: "application/zip" }), file);
-      toast(t("exportSaved", { file }));
+      const out = await make();
+      if (!out) return;
+      if (how === "save") { saveFile(out.blob, out.file); toast(t("exportSaved", { file: out.file })); }
+      // a picture made already can go straight to the share menu; a zip took too long after the tap, so ask once more
+      else if (st.what === "all") await deliverFile(out.blob, out.file);
+      else await shareFile(out.blob, out.file);
     } catch (err) {
       console.error(err);
       toast(t("actionFailed"));
     } finally {
-      save.disabled = false;
+      save.disabled = share.disabled = false;
     }
-  });
+  }
+  save.addEventListener("click", () => void send("save"));
+  share.addEventListener("click", () => void send("share"));
 
   openDialog(t("exportTitle"), [
     h("div", { class: "xrow" }, h("span", { class: "lbl", text: t("exportFormat") }), fmtSeg),
@@ -162,7 +162,7 @@ export function openExport(host: ExportHost): void {
     h("div", { class: "xrow" }, h("span", { class: "lbl", text: t("exportScale") }), scales),
     h("div", { class: "xrow name" }, h("span", { class: "lbl", text: t("exportName") }), name, ext),
     transRow, note, img,
-    h("div", { class: "sheet-foot" }, info, save),
+    h("div", { class: "sheet-foot" }, info, share, save),
   ], () => { token++; if (url) URL.revokeObjectURL(url); }, { id: "export", closeLabel: t("close") });
   update();
 }

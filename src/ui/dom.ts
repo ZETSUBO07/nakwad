@@ -69,6 +69,8 @@ const ICONS = {
   selectAll: ["M4 4h16v16H4z", "M8 8h8v8H8z"],
   invert: ["M4 4h16v16H4z", "M12 4v16", "M12 8h8", "M12 12h8", "M12 16h8"],
   deselect: ["M4 4h3", "M17 4h3v3", "M20 17v3h-3", "M7 20H4v-3", "M9 9l6 6", "M15 9l-6 6"],
+  backup: ["M12 3v11", "M8 10l4 4 4-4", "M4 14v6h16v-6"],
+  restore: ["M12 15V4", "M8 8l4-4 4 4", "M4 14v6h16v-6"],
   cut: ["M6 7a2 2 0 1 0 0 .01", "M6 17a2 2 0 1 0 0 .01", "M8 8l12 8", "M8 16l12-8"],
 } as const;
 export type IconName = keyof typeof ICONS;

@@ -31,6 +31,8 @@ export interface Prefs {
   toolbar: { land?: TbState; port?: TbState };
   /** layer panel open; null = decide by screen width */
   layersOpen: boolean | null;
+  /** when everything was last backed up on this device (ms), null = never */
+  lastBackup: number | null;
   /** last text settings, used for the next text box */
   text: { font: string; size: number; align: "left" | "center" | "right" };
 }
@@ -62,7 +64,7 @@ const KEY = "nakwad.prefs";
 export function defaultPrefs(): Prefs {
   return {
     lastPaper: null, paperRecent: [], hand: "left", finger: "pen", stab: DEFAULT_STAB, font: "bright",
-    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null,
+    brush: "pen", color: SWATCHES[0], colorRecent: [], brushes: structuredClone(BRUSH_DEFAULTS), toolbar: {}, layersOpen: null, lastBackup: null,
     text: { font: "Anuphan", size: 72, align: "left" },
   };
 }
@@ -98,6 +100,7 @@ export function parsePrefs(raw: string | null): Prefs {
     }
   }
   if (typeof v.layersOpen === "boolean") out.layersOpen = v.layersOpen;
+  if (typeof v.lastBackup === "number" && Number.isFinite(v.lastBackup) && v.lastBackup > 0) out.lastBackup = v.lastBackup;
   if (isObj(v.text)) {
     const tx = v.text;
     if (typeof tx.font === "string" && tx.font.length > 0 && tx.font.length <= 120) out.text.font = tx.font;
