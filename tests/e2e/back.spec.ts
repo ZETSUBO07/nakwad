@@ -13,7 +13,10 @@ async function newWork(page: Page) {
   await page.locator('#new-work [data-action="start"]').click();
   await expect(page.getByTestId("paper")).toBeVisible();
 }
-const back = (page: Page) => page.evaluate(() => history.back());
+/** press back; when that leaves the app, the page going away mid-call is expected */
+const back = (page: Page) => page.evaluate(() => history.back()).catch((e: Error) => {
+  if (!/context was destroyed|navigation/i.test(e.message)) throw e;
+});
 const inApp = (page: Page) => page.url().includes("/nakwad/");
 
 test("back closes a window, then a menu, then the work; once more leaves the app", async ({ page }) => {
