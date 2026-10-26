@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyAction, dropTarget, drawBlock, layerMenuState, moveTarget, validateDoc, newWork, type LayerProps, type PageState } from "../../../src/core";
+import { applyAction, bulkState, commit, deleteMany, derive, dropTarget, drawBlock, layerMenuState, mergeMany, moveTarget, newPage, undo, validateDoc, newWork, type Action, type LayerProps, type Page, type PageState } from "../../../src/core";
 
 const state = (order: string[], layers: PageState["layers"] = {}): PageState => ({ w: 100, h: 100, order, layers: { ...Object.fromEntries(order.map((id) => [id, []])), ...layers } });
 const props = (o: Record<string, Partial<LayerProps>> = {}): Record<string, LayerProps> =>
@@ -81,5 +81,69 @@ describe("locked in stored works", () => {
     expect(validateDoc(doc).ok).toBe(true);
     (doc.layers.L1 as unknown as Record<string, unknown>).locked = "yes";
     expect(validateDoc(doc).ok).toBe(false);
+  });
+});
+
+describe("several layers at once", () => {
+  const dot = (color: string) => ({ kind: "stroke" as const, brush: "pen" as const, color, size: 2, opacity: 1, pressure: false, seed: 1, points: [] });
+  const s4 = () => state(["A", "B", "C", "D"], { A: [dot("#000001")], B: [dot("#000002")], C: [dot("#000003")], D: [dot("#000004")] });
+  const run = (s: PageState, a: Action) => { const c = structuredClone(s); applyAction(c, a); return c; };
+
+  it("the bar: what can be done with the chosen layers", () => {
+    const s = s4();
+    expect(bulkState(s, props(), [])).toMatchObject({ count: 0, delete: false, merge: false });
+    expect(bulkState(s, props(), ["B"])).toMatchObject({ count: 1, delete: true, merge: false, hide: true, lock: true });
+    expect(bulkState(s, props(), ["B", "D", "Z"])).toMatchObject({ count: 2, delete: true, merge: true });
+    // all of them: at least one layer has to stay
+    expect(bulkState(s, props(), ["A", "B", "C", "D"])).toMatchObject({ delete: false, merge: true });
+    // one locked: no delete and no merge, and the lock button unlocks only when all are locked
+    expect(bulkState(s, props({ C: { locked: true } }), ["B", "C"])).toMatchObject({ delete: false, merge: false, locked: true, lock: true });
+    expect(bulkState(s, props({ B: { locked: true }, C: { locked: true } }), ["B", "C"]).lock).toBe(false);
+    // hide while any is shown, show when all are hidden
+    expect(bulkState(s, props({ B: { visible: false } }), ["B", "C"]).hide).toBe(true);
+    expect(bulkState(s, props({ B: { visible: false }, C: { visible: false } }), ["B", "C"]).hide).toBe(false);
+  });
+
+  it("deletes in one step; the active layer moves to the nearest one left below", () => {
+    const s = s4();
+    const r = deleteMany(s, props(), ["B", "C"], "C")!;
+    expect(r.action).toEqual({ type: "multi", steps: [{ type: "del", id: "B" }, { type: "del", id: "C" }] });
+    expect(run(s, r.action).order).toEqual(["A", "D"]);
+    expect(r.active).toBe("A");
+    // kept active layer stays
+    expect(deleteMany(s, props(), ["B", "C"], "D")!.active).toBe("D");
+    // nothing left below: the lowest kept layer
+    expect(deleteMany(s, props(), ["A", "B"], "A")!.active).toBe("C");
+    // a single layer is a plain delete
+    expect(deleteMany(s, props(), ["B"], "D")!.action).toEqual({ type: "del", id: "B" });
+    expect(deleteMany(s, props(), ["A", "B", "C", "D"], "A")).toBeNull();
+    expect(deleteMany(s, props({ B: { locked: true } }), ["B"], "A")).toBeNull();
+  });
+
+  it("merges into the lowest chosen layer in one step, keeping their order and opacity", () => {
+    const s = s4();
+    const r = mergeMany(s, props({ D: { opacity: 0.5 } }), ["D", "B"])!;
+    expect(r.into).toBe("B");
+    expect(r.action).toEqual({ type: "merge", id: "D", into: "B", alpha: 0.5 });
+    const three = mergeMany(s, props(), ["A", "C", "D"])!;
+    expect(three.into).toBe("A");
+    const after3 = run(s, three.action);
+    expect(after3.order).toEqual(["A", "B"]);
+    // C under D inside A, as before
+    const A = after3.layers.A!;
+    expect(A.map((e) => e.kind)).toEqual(["stroke", "group", "group"]);
+    expect(A.slice(1).map((g) => g.kind === "group" && g.items[0]?.kind === "stroke" ? g.items[0].color : "")).toEqual(["#000003", "#000004"]);
+    expect(mergeMany(s, props(), ["A"])).toBeNull();
+    expect(mergeMany(s, props({ A: { locked: true } }), ["A", "B"])).toBeNull();
+  });
+
+  it("undo brings every layer of the step back at once", () => {
+    let p: Page = newPage("P1", 100, 100, "L1");
+    p = commit(p, { type: "add", id: "L2", index: 1 });
+    p = commit(p, { type: "add", id: "L3", index: 2 });
+    const r = deleteMany(derive(p), {}, ["L2", "L3"], "L3")!;
+    p = commit(p, r.action);
+    expect(derive(p).order).toEqual(["L1"]);
+    expect(derive(undo(p)).order).toEqual(["L1", "L2", "L3"]);
   });
 });

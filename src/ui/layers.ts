@@ -1,4 +1,4 @@
-import { PAPER_PRESET_COLORS, dropTarget, layerMenuState, moveTarget, type LayerId, type LayerProps, type MoveWhere, type PageState } from "../core";
+import { PAPER_PRESET_COLORS, bulkState, dropTarget, layerMenuState, moveTarget, type LayerId, type LayerProps, type MoveWhere, type PageState } from "../core";
 import { t, type MessageKey } from "../i18n";
 import { openDialog } from "./dialog";
 import { menuAt, type Area } from "./dock";
@@ -25,6 +25,11 @@ export interface LayersHost {
   /** the layer colour; `final` false while the colour wheel is dragged (one undo step for the drag) */
   bg(id: LayerId, color: string | null, final: boolean): void;
   setProps(id: LayerId, patch: Partial<LayerProps>, final: boolean): void;
+  /** several chosen layers: delete or merge in one undo step; false when it was not allowed */
+  removeMany(ids: readonly LayerId[]): boolean;
+  mergeMany(ids: readonly LayerId[]): boolean;
+  /** several chosen layers: show, hide, lock or unlock */
+  setPropsMany(ids: readonly LayerId[], patch: Partial<LayerProps>): void;
   exportLayer(id: LayerId): void;
   importImage(): void;
 }
@@ -53,6 +58,14 @@ export class LayersPanel {
   private readonly addBtn: HTMLButtonElement;
   private readonly opIn: HTMLInputElement;
   private readonly opOut: HTMLOutputElement;
+  private readonly foot: HTMLElement;
+  private readonly pickBtn: HTMLButtonElement;
+  private readonly bulk: HTMLElement;
+  private readonly bulkInfo: HTMLElement;
+  private readonly bulkNote: HTMLElement;
+  private readonly bulkBtns: Record<"hide" | "lock" | "merge" | "delete", HTMLButtonElement>;
+  /** choosing several layers: the ones ticked so far; null when not choosing */
+  private pick: Set<LayerId> | null = null;
   private menu: HTMLElement | null = null;
   private pop: HTMLElement | null = null;
   private press: Press | null = null;
@@ -71,11 +84,29 @@ export class LayersPanel {
     this.opOut = h("output");
     this.opIn.addEventListener("input", () => { this.opOut.value = `${this.opIn.value}%`; host.setProps(host.active(), { opacity: Number(this.opIn.value) / 100 }, false); });
     this.opIn.addEventListener("change", () => host.setProps(host.active(), { opacity: Number(this.opIn.value) / 100 }, true));
+    this.pickBtn = button({ icon: "multi", title: t("layerPickMany"), class: "icon-btn", data: { action: "layer-pick" }, onClick: () => this.setPicking(!this.pick) });
+    this.pickBtn.setAttribute("aria-pressed", "false");
+    this.foot = h("label", { class: "lfoot" }, h("span", { text: t("layerOpacity") }), this.opOut, this.opIn);
+    const act = (k: keyof typeof this.bulkBtns, ic: IconName, key: MessageKey, run: () => void) => button({ icon: ic, label: t(key), class: "lbtn", data: { action: `bulk-${k}` }, onClick: run });
+    this.bulkBtns = {
+      hide: act("hide", "eyeOff", "layerBulkHide", () => this.bulkProps("visible")),
+      lock: act("lock", "lock", "layerBulkLock", () => this.bulkProps("locked")),
+      merge: act("merge", "merge", "layerBulkMerge", () => { if (this.pick && host.mergeMany(this.picked())) this.setPicking(false); }),
+      delete: act("delete", "trash", "layerBulkDelete", () => { if (this.pick && host.removeMany(this.picked())) this.setPicking(false); }),
+    };
+    this.bulkInfo = h("b", { data: { testid: "layer-picked" } });
+    this.bulkNote = h("p", { class: "lbulk-note" });
+    this.bulk = h("div", { class: "lbulk", data: { testid: "layer-bulk" } },
+      h("div", { class: "lbulk-top" }, this.bulkInfo, h("span", { class: "spacer" }),
+        button({ label: t("layerPickAll"), class: "ghost", data: { action: "pick-all" }, onClick: () => this.pickAll() }),
+        button({ label: t("layerPickDone"), class: "primary", data: { action: "pick-done" }, onClick: () => this.setPicking(false) })),
+      h("div", { class: "lbulk-acts" }, this.bulkBtns.hide, this.bulkBtns.lock, this.bulkBtns.merge, this.bulkBtns.delete),
+      this.bulkNote);
+    this.bulk.hidden = true;
     this.el = h("aside", { class: "layers", attrs: { "aria-label": t("layers") }, data: { testid: "layers" } },
-      h("div", { class: "lhead" }, h("h2", { text: t("layers") }), h("span", { class: "spacer" }),
+      h("div", { class: "lhead" }, h("h2", { text: t("layers") }), h("span", { class: "spacer" }), this.pickBtn,
         button({ icon: "image", title: t("imageImport"), class: "icon-btn", data: { action: "image-import" }, onClick: () => host.importImage() }), this.addBtn, close),
-      this.list,
-      h("label", { class: "lfoot" }, h("span", { text: t("layerOpacity") }), this.opOut, this.opIn));
+      this.list, this.foot, this.bulk);
 
     this.list.addEventListener("pointerdown", this.onDown);
     this.list.addEventListener("pointermove", this.onMove);
@@ -84,7 +115,7 @@ export class LayersPanel {
     this.list.addEventListener("contextmenu", (e) => {
       e.preventDefault();
       const row = (e.target as HTMLElement).closest<HTMLElement>(".lrow");
-      if (row?.dataset.layer) this.openMenu(row.dataset.layer, row);
+      if (row?.dataset.layer && !this.pick) this.openMenu(row.dataset.layer, row);
     });
     const outside = (e: PointerEvent) => {
       const tgt = e.target as Node;
@@ -101,8 +132,10 @@ export class LayersPanel {
   update(): void {
     if (this.press?.mode === "drag") return;
     const s = this.host.state(), props = this.host.props(), active = this.host.active();
+    if (this.pick) for (const id of this.pick) if (!s.order.includes(id)) this.pick.delete(id);
     const rows = [...s.order].reverse().map((id) => this.row(id, s, props[id], id === active));
     this.list.replaceChildren(...rows);
+    this.showBulk();
     this.addBtn.disabled = s.order.length >= this.host.maxLayers();
     this.addBtn.title = this.addBtn.disabled ? t("layerFull", { n: this.host.maxLayers() }) : t("layerAdd");
     const p = props[active];
@@ -140,6 +173,14 @@ export class LayersPanel {
     const label = h("div", { class: "lname" }, h("b", { text: name }),
       p?.locked ? h("span", { class: "llock", attrs: { title: t("layerLockedIcon"), "aria-label": t("layerLockedIcon") } }, icon("lock")) : null,
       p && p.opacity < 1 ? h("small", { text: `${Math.round(p.opacity * 100)}%` }) : null);
+    if (this.pick) {
+      const on = this.pick.has(id);
+      const check = h("span", { class: "lcheck", attrs: { "aria-hidden": "true" } }, icon("check"));
+      const row = h("div", { class: on ? "lrow picked" : "lrow", attrs: { role: "option", "aria-selected": String(on), "aria-label": t("layerPickOne", { name }) }, data: { layer: id, picked: String(on) } },
+        check, eye, thumb, label);
+      if (!visible) row.classList.add("hidden-layer");
+      return row;
+    }
     const row = h("div", { class: active ? "lrow active" : "lrow", attrs: { role: "option", "aria-selected": String(active), "aria-label": t("layerSelect", { name }) }, data: { layer: id } },
       eye, thumb, label, bg, handle);
     if (!visible) row.classList.add("hidden-layer");
@@ -159,6 +200,7 @@ export class LayersPanel {
     const p: Press = { id: e.pointerId, layer: row.dataset.layer, row, x0: e.clientX, y0: e.clientY, y: e.clientY, timer: 0, mode: "wait", scroll0: this.list.scrollTop,
       onName: !!target.closest(".lname b") && row.classList.contains("active") };
     this.press = p;
+    if (this.pick) { p.onName = false; return; }
     if (target.closest(".lhandle")) { this.startDrag(p); return; }
     p.timer = window.setTimeout(() => { if (this.press === p && p.mode === "wait") { p.mode = "menu"; this.openMenu(p.layer, row); } }, LONG_PRESS_MS);
   };
@@ -182,7 +224,8 @@ export class LayersPanel {
     this.press = null;
     if (p.mode === "wait" && e.type === "pointerup") {
       const name = p.onName ? p.row.querySelector<HTMLElement>(".lname b") : null;
-      if (name) this.editName(p.layer, name); else this.host.select(p.layer);
+      if (this.pick) this.toggle(p.layer);
+      else if (name) this.editName(p.layer, name); else this.host.select(p.layer);
     }
     if (p.mode === "drag") this.endDrag(p, e.type === "pointerup");
   };
@@ -258,6 +301,7 @@ export class LayersPanel {
       item("layerDuplicate", "copy", m.duplicate, () => this.host.duplicate(id), "duplicate"),
       item("layerMergeDown", "merge", m.merge, () => this.host.merge(id), "merge"),
       item("layerRename", "rename", true, () => this.rename(id), "rename"),
+      item("layerPickMany", "multi", true, () => this.setPicking(true, id), "pick"),
       item("layerColor", "palette", true, () => this.openPop(id, row), "color"),
       item(p?.visible === false ? "layerShowItem" : "layerHideItem", p?.visible === false ? "eye" : "eyeOff", true, () => this.host.setProps(id, { visible: p?.visible === false }, true), "visible"),
       item(p?.locked ? "layerUnlock" : "layerLock", p?.locked ? "unlock" : "lock", true, () => this.host.setProps(id, { locked: !p?.locked }, true), "lock"),
@@ -281,8 +325,65 @@ export class LayersPanel {
 
   closeMenu(): void { this.menu?.remove(); this.menu = null; }
 
-  /** Close the open menu or colour popover (the back button); false when none was open. */
+  // ---------- choosing several layers ----------
+
+  /** Start or stop choosing several layers; starting ticks `first` (or the active layer). */
+  setPicking(on: boolean, first?: LayerId): void {
+    this.closeMenu();
+    this.closePop();
+    this.pick = on ? new Set([first ?? this.host.active()]) : null;
+    this.el.classList.toggle("picking", on);
+    this.pickBtn.setAttribute("aria-pressed", String(on));
+    this.update();
+  }
+
+  get picking(): boolean { return !!this.pick; }
+
+  /** The ticked layers, bottom → top. */
+  private picked(): LayerId[] {
+    const set = this.pick;
+    return set ? this.host.state().order.filter((id) => set.has(id)) : [];
+  }
+
+  private toggle(id: LayerId): void {
+    if (!this.pick) return;
+    if (this.pick.has(id)) this.pick.delete(id); else this.pick.add(id);
+    this.update();
+  }
+
+  private pickAll(): void {
+    if (!this.pick) return;
+    const order = this.host.state().order;
+    this.pick = this.pick.size === order.length ? new Set() : new Set(order);
+    this.update();
+  }
+
+  /** Hide/show or lock/unlock all ticked layers: hide (lock) while any is not, else the other way. */
+  private bulkProps(k: "visible" | "locked"): void {
+    const ids = this.picked();
+    if (!ids.length) return;
+    const st = bulkState(this.host.state(), this.host.props(), ids);
+    this.host.setPropsMany(ids, k === "visible" ? { visible: !st.hide } : { locked: st.lock });
+  }
+
+  private showBulk(): void {
+    this.foot.hidden = !!this.pick;
+    this.bulk.hidden = !this.pick;
+    if (!this.pick) return;
+    const s = this.host.state(), ids = this.picked(), st = bulkState(s, this.host.props(), ids);
+    this.bulkInfo.textContent = st.count ? t("layerPicked", { n: st.count }) : t("layerPickNone");
+    const set = (b: HTMLButtonElement, ic: IconName, key: MessageKey, enabled: boolean) => { b.replaceChildren(icon(ic), h("span", { text: t(key) })); b.disabled = !enabled; };
+    set(this.bulkBtns.hide, st.hide ? "eyeOff" : "eye", st.hide ? "layerBulkHide" : "layerBulkShow", st.count > 0);
+    set(this.bulkBtns.lock, st.lock ? "lock" : "unlock", st.lock ? "layerBulkLock" : "layerBulkUnlock", st.count > 0);
+    set(this.bulkBtns.merge, "merge", "layerBulkMerge", st.merge);
+    set(this.bulkBtns.delete, "trash", "layerBulkDelete", st.delete);
+    this.bulkNote.textContent = st.locked ? t("layerBulkLockedNote") : st.count && st.count === s.order.length ? t("layerBulkKeepOne") : "";
+    this.bulkNote.hidden = !this.bulkNote.textContent;
+  }
+
+  /** Close the open menu or colour popover, or stop choosing several (the back button); false when none was open. */
   closeOpen(): boolean {
+    if (!this.menu && !this.pop && this.pick) { this.setPicking(false); return true; }
     if (!this.menu && !this.pop) return false;
     this.closeMenu();
     this.closePop();

@@ -24,6 +24,7 @@ const fullDoc = (): WorkDoc => {
     { type: "textflat", layer: "L2", tid: "T1", img: "I2", w: 10, h: 10 },
     { type: "del", id: "L2" },
     { type: "add", id: "L3", index: 1, color: "#ffffff" },
+    { type: "multi", steps: [{ type: "merge", id: "L3", into: "L1", alpha: 0.5 }] },
   ];
   for (const a of actions) p = commit(p, a);
   p.base.layers.L1 = [{ kind: "bg", color: "#ffffff", holes: [stroke("eraserall")] }, { kind: "group", items: [stroke()], opacity: 1, m: [1, 0, 0], src: [100, 100] }, { kind: "image", img: "I3", x: 0, y: 0, w: 5, h: 5, opacity: 1 }];
@@ -147,6 +148,12 @@ describe("validateDoc: every rule", () => {
     ["text change ids", { type: "textset", layer: "L1", tid: "" , text: null }],
     ["text change content", { type: "textset", layer: "L1", tid: "T1", text: { ...T, size: -2 } }],
     ["text to picture", { type: "textflat", layer: "L1", tid: "T1", img: "I1", w: 0, h: 1 }],
+    ["bulk without steps", { type: "multi", steps: [] }],
+    ["bulk not a list", { type: "multi", steps: { type: "del", id: "L1" } }],
+    ["bulk with a move", { type: "multi", steps: [{ type: "move", id: "L1", to: 0 }] }],
+    ["bulk inside bulk", { type: "multi", steps: [{ type: "multi", steps: [{ type: "del", id: "L1" }] }] }],
+    ["bulk with a bad delete", { type: "multi", steps: [{ type: "del", id: "L1" }, { type: "del", id: "" }] }],
+    ["bulk with a bad step", { type: "multi", steps: [null] }],
   ];
   it.each(badActions)("rejects a bad action: %s", (_n, a) => {
     const doc = fullDoc();

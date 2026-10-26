@@ -143,6 +143,11 @@ function action(c: Checker, v: unknown, path: string): boolean {
       return (isId(v.id) && Number.isInteger(v.to) && (v.to as number) >= 0) || c.fail(path, "bad move");
     case "merge":
       return (isId(v.id) && isId(v.into) && isUnit(v.alpha)) || c.fail(path, "bad merge");
+    case "multi": {
+      const steps = v.steps;
+      if (!Array.isArray(steps) || !steps.length || steps.length > LIMITS.layersPerPage) return c.fail(path, "bad bulk change");
+      return steps.every((x, i) => (isObj(x) && (x.type === "del" || x.type === "merge") ? action(c, x, `${path}.steps[${i}]`) : c.fail(`${path}.steps[${i}]`, "bad bulk step")));
+    }
     case "draw":
       if (!isId(v.layer) || !isObj(v.entry) || !DRAW_KINDS.has(v.entry.kind as string)) return c.fail(path, "bad draw");
       return entry(c, v.entry, path + ".entry", 0);
