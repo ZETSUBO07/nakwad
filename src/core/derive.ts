@@ -91,6 +91,9 @@ export function applyAction(s: PageState, a: Action): void {
     case "del":
       s.order = s.order.filter((x) => x !== a.id);
       return;
+    case "multi":
+      for (const x of a.steps) applyAction(s, x);
+      return;
     case "move": {
       const i = s.order.indexOf(a.id);
       if (i < 0) return;

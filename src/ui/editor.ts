@@ -1,4 +1,4 @@
-import { BRUSHES, LIMITS, allMask, canRedo, canUndo, commit, derive, drawBlock, fontsInUse, inMask, invert, invertMask, layersFor, maskBounds, mul, newPage, nextId, paperFill, rectMask, redo, replaceLast, shiftMask, thinOutline, undo, usableMask, validActive, type DrawEntry, type Mask, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
+import { BRUSHES, LIMITS, allMask, canRedo, canUndo, commit, deleteMany, derive, mergeMany, drawBlock, fontsInUse, inMask, invert, invertMask, layersFor, maskBounds, mul, newPage, nextId, paperFill, rectMask, redo, replaceLast, shiftMask, thinOutline, undo, usableMask, validActive, type DrawEntry, type Mask, type Action, type ImageEntry, type LayerId, type LayerProps, type Mat, type Page, type PageState, type Point, type StrokeEntry, type TextData, type WorkDoc } from "../core";
 import { t } from "../i18n";
 import { IDENTITY, Stabilizer, attachInput, toScreen, zoomPercent, type Frame, type InputController, type View } from "../input";
 import { PageRenderer, clipTo, drawText, fitScale, hitText, makeCanvas, ctx2d, measureText, onCanvasRestored, targetDpr } from "../render";
@@ -165,6 +165,9 @@ export class Editor {
       clear: (id) => this.clearLayer(id),
       bg: (id, color, final) => this.layerColor(id, color, final),
       setProps: (id, patch, final) => this.setLayerProps(id, patch, final),
+      removeMany: (ids) => this.removeLayers(ids),
+      mergeMany: (ids) => this.mergeLayers(ids),
+      setPropsMany: (ids, patch) => this.setManyProps(ids, patch),
       exportLayer: (id) => void this.exportLayer(id),
       importImage: () => this.fileIn.click(),
     });
@@ -934,6 +937,37 @@ export class Editor {
     if (!into || this.doc.layers[id]?.locked || this.doc.layers[into]?.locked) return;
     this.setPage({ ...commit(this.page, { type: "merge", id, into, alpha: this.doc.layers[id]?.opacity ?? 1 }), active: into });
     this.refresh();
+  }
+
+  /** Several chosen layers deleted in one undo step. */
+  private removeLayers(ids: readonly LayerId[]): boolean {
+    const r = deleteMany(derive(this.page), this.doc.layers, ids, this.page.active);
+    if (!r) return false;
+    this.setPage({ ...commit(this.page, r.action), active: r.active });
+    this.refresh();
+    toast(t("layerBulkDeleted", { n: ids.length }));
+    return true;
+  }
+
+  /** Several chosen layers merged into the lowest of them in one undo step. */
+  private mergeLayers(ids: readonly LayerId[]): boolean {
+    const r = mergeMany(derive(this.page), this.doc.layers, ids);
+    if (!r) return false;
+    this.setPage({ ...commit(this.page, r.action), active: r.into });
+    this.refresh();
+    toast(t("layerBulkMerged", { n: ids.length }));
+    return true;
+  }
+
+  /** Show, hide, lock or unlock several layers (settings, not undo steps). */
+  private setManyProps(ids: readonly LayerId[], patch: Partial<LayerProps>): void {
+    const layers = { ...this.doc.layers };
+    for (const id of ids) { const cur = layers[id]; if (cur) layers[id] = { ...cur, ...patch }; }
+    this.doc = { ...this.doc, layers };
+    this.renderer.setProps(this.doc.layers);
+    this.draw();
+    this.panel.update();
+    this.saver.markDirty();
   }
 
   private clearLayer(id: LayerId): void {

@@ -160,11 +160,15 @@ export type DrawEntry = StrokeEntry | ImageEntry | ReplaceEntry | SelEraseEntry 
 
 // ---------- actions (one per undo step) ----------
 
+/** The layer steps a bulk change of several layers is made of. */
+export type LayerStep = { type: "del"; id: LayerId } | { type: "merge"; id: LayerId; into: LayerId; alpha: number };
+
 export type Action =
   | { type: "add"; id: LayerId; index: number; copyOf?: LayerId; image?: ImageEntry; text?: TextData; /** a new empty layer filled with this colour */ color?: string }
-  | { type: "del"; id: LayerId }
+  | LayerStep
   | { type: "move"; id: LayerId; to: number }
-  | { type: "merge"; id: LayerId; into: LayerId; alpha: number }
+  /** several layers deleted or merged at once: one undo step */
+  | { type: "multi"; steps: LayerStep[] }
   | { type: "draw"; layer: LayerId; entry: DrawEntry }
   | { type: "clear"; layer: LayerId }
   | { type: "xform"; layer: LayerId; m: Mat }

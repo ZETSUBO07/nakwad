@@ -308,3 +308,19 @@ body.app .scales button[aria-checked="true"] { background: var(--sel); border-co
 .editor .desk.selecting { cursor: crosshair; }
 .lmenu kbd { margin-left: auto; padding-left: 12px; font-family: inherit; font-size: .74rem; color: var(--muted); }
 body.app .mi[aria-checked="true"] { background: var(--sel); }
+
+/* choosing several layers */
+.layers.picking .lrow { cursor: default; }
+.lcheck { flex: none; width: 26px; height: 26px; margin-left: 4px; display: grid; place-items: center; border-radius: 7px; border: 2px solid var(--muted); color: transparent; }
+.lcheck .icon { width: 18px; height: 18px; stroke-width: 3; }
+.lrow.picked { background: var(--sel); border-color: var(--ink-red); }
+.lrow.picked .lcheck { background: var(--ink-red); border-color: var(--ink-red); color: var(--paper); }
+.lhead button[aria-pressed="true"] { background: var(--sel); border-color: var(--ink-red); color: var(--paper); }
+.lbulk { padding: 8px 10px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.lbulk[hidden], .lfoot[hidden] { display: none; }
+.lbulk-top { display: flex; align-items: center; gap: 6px; font-size: .88rem; }
+.lbulk-top button { min-height: 36px; padding: 4px 12px; }
+.lbulk-acts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+body.app .lbtn { flex-direction: column; gap: 2px; min-height: 54px; padding: 6px 2px; font-size: .78rem; }
+.lbulk-note { margin: 0; font-size: .78rem; color: var(--muted); }
+.lbulk-note[hidden] { display: none; }
