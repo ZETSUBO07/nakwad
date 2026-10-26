@@ -199,3 +199,24 @@ describe("two and three finger gestures", () => {
     expect(log).toEqual(["start 5", "cancel", "start 6", "cancel", "pinchStart", "pinchEnd"]);
   });
 });
+
+describe("pen buttons, for any make of pen", () => {
+  it("the side button or the eraser end erases; the plain tip, a mouse or a finger do not", async () => {
+    const { penErases } = await import("../../../src/input/dom");
+    expect(penErases({ pointerType: "pen", buttons: 1, button: 0 })).toBe(false);
+    expect(penErases({ pointerType: "pen", buttons: 3, button: 0 })).toBe(true); // tip + side button
+    expect(penErases({ pointerType: "pen", buttons: 32, button: 5 })).toBe(true); // eraser end
+    expect(penErases({ pointerType: "pen", buttons: 0, button: 5 })).toBe(true);
+    expect(penErases({ pointerType: "mouse", buttons: 2, button: 2 })).toBe(false);
+    expect(penErases({ pointerType: "touch", buttons: 1, button: 0 })).toBe(false);
+  });
+
+  it("the side button pressed while the pen only hovers is not a touch of the screen", async () => {
+    const { penHoverPress } = await import("../../../src/input/dom");
+    expect(penHoverPress({ pointerType: "pen", buttons: 2, pressure: 0 })).toBe(true);
+    expect(penHoverPress({ pointerType: "pen", buttons: 3, pressure: 0.4 })).toBe(false);
+    expect(penHoverPress({ pointerType: "pen", buttons: 1, pressure: 0 })).toBe(false); // some tablets report 0 between samples
+    expect(penHoverPress({ pointerType: "pen", buttons: 32, pressure: 0 })).toBe(false);
+    expect(penHoverPress({ pointerType: "mouse", buttons: 0, pressure: 0 })).toBe(false);
+  });
+});

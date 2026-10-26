@@ -2,8 +2,9 @@ import { newWork } from "../core";
 import { pseudoMessages, setMessages, t } from "../i18n";
 import { th } from "../i18n/th";
 import { Store } from "../storage";
+import { closeTopDialog, initBack, syncBack } from "./back";
 import { askRestore, takeSharedFile } from "./backup";
-import { openEditor } from "./editor";
+import { openEditor, type Editor } from "./editor";
 import { Gallery } from "./gallery";
 import { askNewWork } from "./newWork";
 import { startOffline } from "./offline";
@@ -34,6 +35,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   /** a work is open (or opening): never reload then */
   let inWork = false;
   let reloadWhenBack = false;
+  /** the work that is open */
+  let editor: Editor | null = null;
 
   const gallery = new Gallery(store, prefs, {
     open: (id) => void open(id),
@@ -42,6 +45,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
 
   async function showGallery(): Promise<void> {
     inWork = false;
+    editor = null;
+    syncBack();
     if (reloadWhenBack) { location.reload(); return; }
     root.replaceChildren(gallery.el);
     await gallery.show();
@@ -55,6 +60,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
       const r = await openEditor({ store, prefs, savePrefs: () => savePrefs(prefs) }, id, () => void showGallery());
       if (!r.ok) { inWork = false; toast(r.message, 6000); return; }
       root.replaceChildren(r.editor.el);
+      editor = r.editor;
+      syncBack();
     } finally {
       busy = false;
     }
@@ -80,6 +87,16 @@ export async function startApp(root: HTMLElement): Promise<void> {
     if (id) await open(id); else inWork = false;
   }
 
+  // back: the top window, then the editor's menus and tools, then the work itself; in the gallery it leaves the app
+  initBack({
+    needed: () => !!editor || !!document.querySelector("dialog[open]"),
+    back: () => {
+      if (closeTopDialog()) return true;
+      if (!editor) return false;
+      if (!editor.back()) void editor.close();
+      return true;
+    },
+  });
   await showGallery();
   // a backup file shared to the app from another app (Android share menu)
   const shared = await takeSharedFile(import.meta.env.BASE_URL).catch((err: unknown) => { console.error(err); return null; });

@@ -139,6 +139,7 @@ export class Editor {
       insetChanged: () => this.applyInset(),
       toolChanged: () => { this.ring.hidden = true; if (this.text?.open) this.text.setColor(this.prefs.color); },
       toggleText: () => this.setMode(this.mode === "text" ? "draw" : "text"),
+      toDraw: () => { if (this.mode !== "draw") this.setMode("draw"); },
       textMode: () => this.mode === "text",
       toggleMove: () => this.setMode(this.mode === "move" ? "draw" : "move"),
       moveMode: () => this.mode === "move",
@@ -203,7 +204,7 @@ export class Editor {
       frame: () => this.frame(),
       view: () => this.view,
       setView: (v, settled) => this.setView(v, settled),
-      strokeStart: (p, kind) => this.strokeStart(p, kind === "pen"),
+      strokeStart: (p, kind, erase) => this.strokeStart(p, kind === "pen", erase),
       strokeMove: (pts, guess) => this.strokeMove(pts, guess),
       strokeEnd: () => this.strokeEnd(),
       strokeCancel: () => { this.live = null; this.predicted = []; this.selDrag = null; this.selLive = null; this.showSel(); this.draw(); },
@@ -399,14 +400,20 @@ export class Editor {
 
   // ---------- strokes and history ----------
 
-  private strokeStart(p: Point, pressure: boolean): void {
+  private strokeStart(p: Point, pressure: boolean, erase = false): void {
     this.toolbar.closeMenu();
     this.panel.closeMenu();
     if (this.mode === "text") { this.textTap(p); return; }
     if (this.mode === "move") return; // outside the frame: nothing to draw
     if (this.mode === "select") { this.selectStart(p); return; }
     if (!this.canChange(this.page.active, true)) return;
-    const tool = this.toolbar.tool;
+    // the pen's side button (or eraser end) erases this one stroke, with the eraser's own size
+    let tool = this.toolbar.tool;
+    if (erase && this.mode === "draw") {
+      const ek = this.prefs.eraser, s = this.prefs.brushes[ek];
+      tool = { ...tool, brush: ek, size: s.size, op: s.op };
+      if (!this.prefs.penButtonSeen) { this.prefs.penButtonSeen = true; this.env.savePrefs(); toast(t("penButtonFound"), 5000); }
+    }
     this.stab = new Stabilizer(this.prefs.stab);
     this.renderer.prepareStroke(this.page.active);
     this.lastPoint = [p[0], p[1]];
@@ -1015,6 +1022,17 @@ export class Editor {
     this.pill.textContent = quota ? t("saveQuota") : t(s === "saved" ? "saveSaved" : s === "saving" ? "saveSaving" : s === "dirty" ? "saveDirty" : "saveError");
     this.pill.dataset.state = s;
     if (s === "error") console.error(err);
+  }
+
+  /**
+   * The back button, before it closes the work: close the open menu, or leave the text, move or
+   * select tool. False when there was nothing to step back from.
+   */
+  back(): boolean {
+    if (this.toolbar.menuOpen) { this.toolbar.closeMenu(); return true; }
+    if (this.panel.closeOpen()) return true;
+    if (this.mode !== "draw") { this.setMode("draw"); return true; }
+    return false;
   }
 
   /** Back to the gallery: save, keep a fresh picture, fold the undo history, release the work. */

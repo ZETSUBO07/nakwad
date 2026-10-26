@@ -13,8 +13,8 @@ export interface InputHost {
   frame(): Frame;
   view(): View;
   setView(v: View, settled: boolean): void;
-  /** a stroke starts at this paper point */
-  strokeStart(p: Point, kind: PointerKind): void;
+  /** a stroke starts at this paper point; `erase` when the pen's side button or eraser end is used */
+  strokeStart(p: Point, kind: PointerKind, erase: boolean): void;
   /** new points of the stroke, plus guesses of where the pen goes next (drawn only until the next frame) */
   strokeMove(points: Point[], predicted: Point[]): void;
   strokeEnd(): void;
@@ -27,6 +27,19 @@ export interface InputHost {
 }
 
 const kindOf = (t: string): PointerKind => (t === "pen" ? "pen" : t === "touch" ? "touch" : "mouse");
+
+/**
+ * Pointer Events give every pen the same signals, whatever its make: bit 2 of `buttons` is the
+ * side (barrel) button, bit 32 the eraser end; `button` 5 is the eraser end touching.
+ */
+export const PEN_TIP = 1, PEN_SIDE = 2, PEN_ERASER = 32;
+export function penErases(e: { pointerType: string; buttons: number; button: number }): boolean {
+  return e.pointerType === "pen" && ((e.buttons & (PEN_SIDE | PEN_ERASER)) !== 0 || e.button === 5);
+}
+/** the side button pressed while the pen only hovers: some tablets report that as a press */
+export function penHoverPress(e: { pointerType: string; buttons: number; pressure: number }): boolean {
+  return e.pointerType === "pen" && (e.buttons & (PEN_TIP | PEN_ERASER)) === 0 && e.pressure === 0;
+}
 
 export interface InputController {
   setFingerMode(m: FingerMode): void;
@@ -47,7 +60,7 @@ export function attachInput(el: HTMLElement, host: InputHost, fingerMode: Finger
   };
 
   const g = new GestureRecognizer({
-    strokeStart: () => { if (current) host.strokeStart(paperPoint(current), kindOf(current.pointerType)); },
+    strokeStart: () => { if (current) host.strokeStart(paperPoint(current), kindOf(current.pointerType), penErases(current)); },
     strokeMove: () => {
       const e = current;
       if (!e) return;
@@ -69,6 +82,7 @@ export function attachInput(el: HTMLElement, host: InputHost, fingerMode: Finger
   const onDown = (e: PointerEvent) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     e.preventDefault();
+    if (penHoverPress(e)) return;
     try { el.setPointerCapture(e.pointerId); } catch { /* the pointer may already be gone */ }
     host.hover(null);
     current = e;

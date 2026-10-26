@@ -281,6 +281,14 @@ export class LayersPanel {
 
   closeMenu(): void { this.menu?.remove(); this.menu = null; }
 
+  /** Close the open menu or colour popover (the back button); false when none was open. */
+  closeOpen(): boolean {
+    if (!this.menu && !this.pop) return false;
+    this.closeMenu();
+    this.closePop();
+    return true;
+  }
+
   // ---------- layer colour ----------
 
   private openPop(id: LayerId, near: HTMLElement): void {
