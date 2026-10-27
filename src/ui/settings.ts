@@ -9,6 +9,8 @@ export interface SettingsHost {
   /** something changed that the page or the editor must apply */
   applied(what: "hand" | "finger" | "font" | "stab"): void;
   resetToolbar(): void;
+  /** close settings and open the diagnostics page */
+  diagnostics(): void;
 }
 
 /** One choice out of a few, shown as a row of buttons (radio group). */
@@ -34,12 +36,13 @@ export function openSettings(host: SettingsHost): void {
   const stabOut = h("output", { text: String(p.stab) });
   stab.addEventListener("input", () => { p.stab = Number(stab.value); stabOut.value = stab.value; change("stab"); });
   const reset = button({ label: t("setTbReset"), data: { action: "toolbar-reset" }, onClick: () => host.resetToolbar() });
-  openDialog(t("settings"), [
+  const diag = button({ label: t("diagButton"), class: "ghost", data: { action: "diagnostics" }, onClick: () => { dlg.close(); host.diagnostics(); } });
+  const dlg = openDialog(t("settings"), [
     segment("setHand", [["left", "setHandLeft"], ["right", "setHandRight"]], () => p.hand, (v) => { p.hand = v; change("hand"); }, "hand"),
     segment("setFinger", [["pen", "setFingerPen"], ["draw", "setFingerDraw"]], () => p.finger, (v) => { p.finger = v; change("finger"); }, "finger"),
     segment("setFont", [["bright", "setFontBright"], ["brush", "setFontBrush"]], () => p.font, (v) => { p.font = v; change("font"); }, "font"),
     h("label", { class: "xrow stab" }, h("span", { class: "lbl", text: t("setStab") }), stab, stabOut),
     h("p", { class: "xnote", text: t("setStabNote") }),
-    h("div", { class: "sheet-foot" }, reset),
+    h("div", { class: "sheet-foot" }, diag, reset),
   ], () => undefined, { closeLabel: t("close"), id: "settings" });
 }
