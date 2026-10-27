@@ -15,6 +15,7 @@ import { openExport } from "./exporter";
 import { PageStrip } from "./pages";
 import { askNewPage, openPaperDialog } from "./paperDialog";
 import { applyPrefsToPage, remember, type Prefs } from "./prefs";
+import { meter, openDiagnostics, trackStroke } from "./diagnostics";
 import { openSettings } from "./settings";
 import { toast } from "./toast";
 import { Toolbar } from "./toolbar";
@@ -207,10 +208,10 @@ export class Editor {
       frame: () => this.frame(),
       view: () => this.view,
       setView: (v, settled) => this.setView(v, settled),
-      strokeStart: (p, kind, erase) => this.strokeStart(p, kind === "pen", erase),
-      strokeMove: (pts, guess) => this.strokeMove(pts, guess),
-      strokeEnd: () => this.strokeEnd(),
-      strokeCancel: () => { this.live = null; this.predicted = []; this.selDrag = null; this.selLive = null; this.showSel(); this.draw(); },
+      strokeStart: (p, kind, erase) => { trackStroke(kind, p[3]); this.strokeStart(p, kind === "pen", erase); },
+      strokeMove: (pts, guess) => { meter.points(pts.map((p) => p[3])); this.strokeMove(pts, guess); },
+      strokeEnd: () => { meter.end(); this.strokeEnd(); },
+      strokeCancel: () => { meter.cancel(); this.live = null; this.predicted = []; this.selDrag = null; this.selLive = null; this.showSel(); this.draw(); },
       undo: () => this.history(undo),
       redo: () => this.history(redo),
       fit: () => this.setView(IDENTITY, true),
@@ -297,6 +298,7 @@ export class Editor {
         applyPrefsToPage(this.prefs);
       },
       resetToolbar: () => { this.toolbar.reset(); toast(t("setTbResetDone")); },
+      diagnostics: () => openDiagnostics({ work: () => { const s = derive(this.page); return { layers: s.order.length, w: s.w, h: s.h }; } }),
     });
   }
 

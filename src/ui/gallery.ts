@@ -2,6 +2,7 @@ import type { Store, WorkMeta } from "../storage";
 import { isLowOnSpace, storageInfo } from "../storage";
 import { t } from "../i18n";
 import { BACKUP_REMIND_DAYS, backupDue, runBackup, runRestore } from "./backup";
+import { openDiagnostics } from "./diagnostics";
 import { openDialog } from "./dialog";
 import { button, formatDate, h } from "./dom";
 import { toast } from "./toast";
@@ -27,11 +28,12 @@ export class Gallery {
   constructor(private readonly store: Store | null, private readonly prefs: Prefs, private readonly actions: GalleryActions) {
     this.info = h("p", { class: "ginfo", data: { testid: "storage" } });
     const version = h("p", { class: "version", text: t("versionLabel", { version: __APP_VERSION__ }), data: { testid: "version" } });
+    const diag = button({ label: t("diagButton"), class: "ghost-link", data: { action: "diagnostics" }, onClick: () => openDiagnostics() });
     const lab = h("a", { class: "ghost-link", text: t("openLab"), attrs: { href: `${import.meta.env.BASE_URL}lab.html` } });
     const head = h("header", { class: "ghead" },
       h("img", { class: "gicon", attrs: { src: `${import.meta.env.BASE_URL}icons/icon-192.png`, alt: "", width: "56", height: "56" } }),
       h("div", { class: "gtitle" }, h("h1", { text: t("appName") }), this.info),
-      h("div", { class: "gside" }, lab, version));
+      h("div", { class: "gside" }, lab, diag, version));
     this.lastBackup = h("span", { class: "glast", data: { testid: "last-backup" } });
     this.fileIn = h("input", { attrs: { type: "file", accept: ".sketchbook,application/zip,application/octet-stream", hidden: "" }, data: { field: "restore-file" } });
     this.fileIn.addEventListener("change", () => { const f = this.fileIn.files?.[0]; this.fileIn.value = ""; if (f) void this.restore(f); });

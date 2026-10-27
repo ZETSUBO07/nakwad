@@ -6,6 +6,9 @@ import { closeTopDialog, initBack, syncBack } from "./back";
 import { askRestore, takeSharedFile } from "./backup";
 import { openEditor, type Editor } from "./editor";
 import { Gallery } from "./gallery";
+import { noteOpen, startDiagnostics } from "./diagnostics";
+import { button, h } from "./dom";
+import { installErrorLog } from "./errorLog";
 import { askNewWork } from "./newWork";
 import { startOffline } from "./offline";
 import { applyPrefsToPage, loadPrefs, savePrefs } from "./prefs";
@@ -21,6 +24,8 @@ export async function startApp(root: HTMLElement): Promise<void> {
   if (new URLSearchParams(location.search).get("lang") === "pseudo") setMessages(pseudoMessages(th));
   document.title = t("appName");
   document.body.classList.add("app");
+  installErrorLog(showCrash);
+  startDiagnostics();
 
   let store: Store | null = null;
   try {
@@ -57,9 +62,11 @@ export async function startApp(root: HTMLElement): Promise<void> {
     busy = true;
     inWork = true;
     try {
+      const t0 = performance.now();
       const r = await openEditor({ store, prefs, savePrefs: () => savePrefs(prefs) }, id, () => void showGallery());
       if (!r.ok) { inWork = false; toast(r.message, 6000); return; }
       root.replaceChildren(r.editor.el);
+      noteOpen(performance.now() - t0);
       editor = r.editor;
       syncBack();
     } finally {
@@ -110,4 +117,14 @@ export async function startApp(root: HTMLElement): Promise<void> {
       reloadLater: () => { reloadWhenBack = true; },
     });
   }
+}
+
+/** Something went wrong that nobody caught: say the saved work is safe and offer a reload. Shown once until closed. */
+function showCrash(): void {
+  if (document.querySelector(".crash")) return;
+  const box = h("div", { class: "crash", attrs: { role: "alert" }, data: { testid: "crash" } },
+    h("span", { text: t("crashText") }),
+    button({ label: t("crashReload"), class: "primary", data: { action: "crash-reload" }, onClick: () => location.reload() }),
+    button({ icon: "close", title: t("close"), class: "icon-btn ghost", data: { action: "crash-close" }, onClick: () => box.remove() }));
+  document.body.append(box);
 }
