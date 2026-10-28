@@ -810,7 +810,9 @@ export class Editor {
     if (active && active !== this.page.active) this.setPage({ ...this.page, active });
     // the paper changed size (resize, or undoing one): lay the view out again
     if (s.w !== this.laidOut.w || s.h !== this.laidOut.h) { this.sel = null; this.showSel(); this.view = IDENTITY; this.layout(); this.panel.update(); this.saver.markDirty(); this.stripSoon(); return; }
-    this.renderer.setState(this.shown(), this.doc.layers);
+    this.renderer.update(this.shown(), this.doc.layers);
+    // how many layers were drawn from their data so far (read by the tests)
+    this.canvas.dataset.redraws = String(this.renderer.redraws);
     this.draw();
     this.panel.update();
     this.saver.markDirty();
