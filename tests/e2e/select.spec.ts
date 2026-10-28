@@ -151,3 +151,34 @@ test("a locked layer refuses moving and deleting the selection", async ({ page }
   await drag(page, [0.4, 0.5], [0.4, 0.8]);
   expect(await dark(page, 0.4, 0.5)).toBe(true);
 });
+
+test("a kept selection shows a bar that clears it with one press, from any tool", async ({ page }) => {
+  await newWork(page);
+  const chip = page.getByTestId("sel-chip");
+  await expect(chip).toBeHidden();
+  await page.keyboard.press("s");
+  await drag(page, [0.3, 0.3], [0.5, 0.7]);
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText(th.selKeptNote);
+  await page.keyboard.press("1"); // the pen: the selection and the bar stay
+  await expect(chip).toBeVisible();
+  await chip.locator('[data-action="sel-clear"]').click();
+  await expect(page.getByTestId("selection")).toHaveAttribute("data-state", "none");
+  await expect(chip).toBeHidden();
+  // drawing lands everywhere again
+  await band(page);
+  expect(await dark(page, 0.2, 0.5)).toBe(true);
+  expect(await dark(page, 0.7, 0.5)).toBe(true);
+});
+
+test("the back button clears a kept selection before leaving the tool, then the work", async ({ page }) => {
+  await newWork(page);
+  await page.keyboard.press("s");
+  await drag(page, [0.3, 0.3], [0.5, 0.7]);
+  await page.evaluate(() => history.back());
+  await expect(page.getByTestId("selection")).toHaveAttribute("data-state", "none");
+  await expect(toolbar(page).locator('[data-action="select"]')).toHaveAttribute("aria-pressed", "true");
+  await page.evaluate(() => history.back());
+  await expect(toolbar(page).locator('[data-action="select"]')).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByTestId("paper")).toBeVisible();
+});

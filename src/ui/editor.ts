@@ -71,6 +71,8 @@ export class Editor {
   private readonly sizeRing: HTMLElement;
   private readonly pill: HTMLElement;
   private readonly zoomBtn: HTMLButtonElement;
+  /** shown while a selection is kept: drawing stays inside it until this is pressed */
+  private readonly selChip: HTMLElement;
   private readonly toolbar: Toolbar;
   private readonly panel: LayersPanel;
   private readonly layersBtn: HTMLButtonElement;
@@ -129,6 +131,10 @@ export class Editor {
     this.sizeRing.hidden = true;
     this.stage = h("div", { class: "stage" }, this.canvas);
     this.desk = h("div", { class: "desk" }, this.stage, this.ring, this.sizeRing);
+    this.selChip = h("div", { class: "sel-chip", attrs: { role: "status" }, data: { testid: "sel-chip" } },
+      h("span", { text: t("selKeptNote") }),
+      button({ icon: "deselect", label: t("selectNone"), class: "primary", data: { action: "sel-clear" }, onClick: () => this.setSel(null) }));
+    this.selChip.hidden = true;
     this.zoomBtn = button({ class: "zoom-badge", title: t("zoomFit"), data: { action: "zoom" }, onClick: () => this.setView(IDENTITY, true) });
     this.toolbar = new Toolbar({
       prefs: this.prefs,
@@ -148,7 +154,7 @@ export class Editor {
       selectItems: () => this.selectItems(),
       sizePreview: (show) => this.sizePreview(show),
     });
-    this.work = h("div", { class: "work" }, this.desk, this.outline.el, this.zoomBtn, this.toolbar.el);
+    this.work = h("div", { class: "work" }, this.desk, this.outline.el, this.selChip, this.zoomBtn, this.toolbar.el);
     this.panel = new LayersPanel({
       state: () => derive(this.page),
       props: () => this.doc.layers,
@@ -528,6 +534,7 @@ export class Editor {
       closed = this.selShape === "rect";
     } else if (d?.kind === "move" && m) m = shiftMask(m, d.dx, d.dy);
     this.outline.show(m, this.frame(), this.view, this.work.getBoundingClientRect(), closed);
+    this.selChip.hidden = !this.sel || !!d;
   }
 
   /** Press with the select tool: inside the selection drags its pixels, elsewhere starts a new selection. */
@@ -1067,6 +1074,7 @@ export class Editor {
   back(): boolean {
     if (this.toolbar.menuOpen) { this.toolbar.closeMenu(); return true; }
     if (this.panel.closeOpen()) return true;
+    if (this.sel) { this.setSel(null); return true; }
     if (this.mode !== "draw") { this.setMode("draw"); return true; }
     return false;
   }
