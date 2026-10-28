@@ -1,4 +1,4 @@
-import { bgOf, type DrawEntry, type Entry, type LayerId, type LayerProps, type Mat, type PageState } from "../core";
+import { bgOf, sameEntries, type DrawEntry, type Entry, type LayerId, type LayerProps, type Mat, type PageState } from "../core";
 import { blit, clearAll, ctx2d, makeCanvas, type Ctx } from "./canvas";
 import { cutHole, renderBg, renderEntry, setMove, type RenderEnv } from "./entries";
 import { fillPaper } from "./paper";
@@ -31,6 +31,8 @@ export interface RendererOptions {
  */
 export class PageRenderer {
   private layers = new Map<LayerId, LayerCanvases>();
+  /** what each layer canvas shows now, to skip layers that did not change */
+  private drawn = new Map<LayerId, readonly Entry[]>();
   private state: PageState = { w: 1, h: 1, order: [], layers: {} };
   private props: Record<LayerId, LayerProps> = {};
   private dpr = 1;
@@ -56,6 +58,25 @@ export class PageRenderer {
     this.rebuild();
   }
 
+  /**
+   * Show a page state after an undo, redo or other change: only layers whose content changed are
+   * drawn again (an undo of one stroke redraws one layer, not all of them).
+   */
+  update(state: PageState, props: Record<LayerId, LayerProps>): void {
+    if (state.w !== this.state.w || state.h !== this.state.h) { this.setState(state, props); return; }
+    this.state = state;
+    this.props = props;
+    this.cache = null;
+    this.live = this.live2 = null;
+    this.forgetGone();
+    for (const id of state.order) if (!this.layers.has(id) || !sameEntries(this.drawn.get(id), state.layers[id] ?? [])) this.renderLayer(id);
+  }
+
+  /** layers no longer on the page: free their canvases */
+  private forgetGone(): void {
+    for (const id of [...this.layers.keys()]) if (!this.state.order.includes(id)) { this.layers.delete(id); this.drawn.delete(id); }
+  }
+
   /** Layer names, visibility and opacity changed: no layer needs redrawing. */
   setProps(props: Record<LayerId, LayerProps>): void {
     this.props = props;
@@ -66,7 +87,7 @@ export class PageRenderer {
   rebuild(): void {
     this.cache = null;
     this.live = this.live2 = null;
-    for (const id of [...this.layers.keys()]) if (!this.state.order.includes(id)) this.layers.delete(id);
+    this.forgetGone();
     for (const id of this.state.order) this.renderLayer(id);
   }
 
@@ -93,7 +114,12 @@ export class PageRenderer {
       this.joinComp(lc);
     }
     this.layers.set(id, lc);
+    this.drawn.set(id, list);
+    this.redraws++;
   }
+
+  /** layers drawn from their data so far (diagnostics and tests) */
+  redraws = 0;
 
   private joinComp(lc: LayerCanvases): void {
     if (!lc.bg || !lc.comp) return;
@@ -112,6 +138,7 @@ export class PageRenderer {
     this.cache = null;
     const lc = this.layers.get(layer);
     if (!lc) { this.renderLayer(layer); return; }
+    this.drawn.set(layer, state.layers[layer] ?? []);
     const x = ctx2d(lc.content);
     x.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     renderEntry(x, entry, this.env());

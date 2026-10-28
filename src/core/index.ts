@@ -7,3 +7,4 @@ export * from "./images";
 export * from "./validate";
 export * from "./layers";
 export * from "./selection";
+export * from "./same";
