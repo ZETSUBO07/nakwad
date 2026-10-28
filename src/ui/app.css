@@ -341,3 +341,9 @@ body.app .lbtn { flex-direction: column; gap: 2px; min-height: 54px; padding: 6p
 .diag-errors code { font-size: .8rem; overflow-wrap: anywhere; }
 .crash { position: fixed; left: 50%; top: max(12px, env(safe-area-inset-top)); transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 10px;
   padding: 8px 8px 8px 16px; border-radius: 12px; background: var(--panel); border: 1px solid var(--ink-red); box-shadow: 0 10px 30px #000a; max-width: calc(100vw - 24px); }
+
+/* a kept selection: say so, and clear it with one press */
+.sel-chip { position: absolute; z-index: 6; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px;
+  padding: 4px 4px 4px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px #0008; font-size: .86rem; color: var(--muted); white-space: nowrap; }
+.sel-chip[hidden] { display: none; }
+.sel-chip button { min-height: 40px; border-radius: 999px; }

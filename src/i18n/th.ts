@@ -385,6 +385,7 @@ export const th = {
   selectAll: "เลือกทั้งหมด",
   selectInvert: "กลับด้านการเลือก",
   selectNone: "ยกเลิกการเลือก",
+  selKeptNote: "วาดได้เฉพาะในเส้นประ",
   selectCopy: "คัดลอกไปเลเยอร์ใหม่",
   selectCut: "ตัดไปเลเยอร์ใหม่",
   selectDelete: "ลบส่วนที่เลือก",
