@@ -347,3 +347,8 @@ body.app .lbtn { flex-direction: column; gap: 2px; min-height: 54px; padding: 6p
   padding: 4px 4px 4px 14px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 6px 20px #0008; font-size: .86rem; color: var(--muted); white-space: nowrap; }
 .sel-chip[hidden] { display: none; }
 .sel-chip button { min-height: 40px; border-radius: 999px; }
+
+/* the eraser button's ▾ corner: tap it to choose the eraser */
+body.app .tbar .eraser-btn { position: relative; }
+.eraser-btn .ecaret { position: absolute; right: 1px; bottom: 0; width: 16px; height: 16px; display: grid; place-items: center; color: var(--paper); opacity: .8; pointer-events: none; }
+.eraser-btn .ecaret .icon { width: 15px; height: 15px; stroke-width: 3; }

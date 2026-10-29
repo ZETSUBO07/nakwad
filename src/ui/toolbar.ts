@@ -46,6 +46,16 @@ export interface MenuItem {
 
 const brushKey = (b: BrushId) => ("brush" + b.charAt(0).toUpperCase() + b.slice(1)) as MessageKey;
 const descKey = (b: BrushId) => (brushKey(b) + "Desc") as MessageKey;
+/**
+ * A click on the ▾ corner of the eraser button (bottom right, where the caret is drawn) opens the
+ * eraser menu. The corner is a bit bigger than the caret, so a fingertip finds it.
+ */
+function onCaret(btn: HTMLElement, e: MouseEvent): boolean {
+  if (e.detail === 0) return false; // keyboard: Enter or Space toggles
+  const r = btn.getBoundingClientRect();
+  return e.clientX >= r.left + r.width * 0.55 && e.clientY >= r.top + r.height * 0.5;
+}
+
 /** press and hold the eraser button this long to choose the eraser */
 const ERASER_HOLD_MS = 450;
 const orientation = (): "land" | "port" => (innerWidth >= innerHeight ? "land" : "port");
@@ -88,7 +98,7 @@ export class Toolbar {
     // while erasing, the brush button simply goes back to drawing
     this.brushBtn = button({ class: "brush-btn", data: { action: "brush" }, onClick: () => { if (isEraser(host.prefs.brush)) { this.closeMenu(); this.toggleEraser(); } else this.toggleMenu(); } });
     this.brushBtn.setAttribute("aria-haspopup", "menu");
-    // tap: eraser on / back to the brush; press and hold (or right-click): which eraser
+    // tap: eraser on / back to the brush; tap the ▾ corner, press and hold, or right-click: which eraser
     this.eraserBtn = button({ class: "eraser-btn", data: { action: "eraser" } });
     this.eraserBtn.setAttribute("aria-haspopup", "menu");
     this.eraserBtn.addEventListener("pointerdown", (e) => {
@@ -99,9 +109,10 @@ export class Toolbar {
     const cancelHold = () => { if (this.eraserHold > 0) clearTimeout(this.eraserHold); };
     this.eraserBtn.addEventListener("pointerleave", cancelHold);
     this.eraserBtn.addEventListener("pointercancel", cancelHold);
-    this.eraserBtn.addEventListener("click", () => {
+    this.eraserBtn.addEventListener("click", (e) => {
       if (this.eraserHold === -1) { this.eraserHold = 0; return; } // the hold opened the menu
       cancelHold();
+      if (onCaret(this.eraserBtn, e)) { this.toggleEraserMenu(); return; }
       this.closeMenu();
       this.toggleEraser();
     });
@@ -246,7 +257,7 @@ export class Toolbar {
     this.brushBtn.dataset.brush = tool.brush;
     const ek = this.host.prefs.eraser;
     this.eraserBtn.setAttribute("aria-pressed", String(drawing && er));
-    this.eraserBtn.replaceChildren(icon(ek));
+    this.eraserBtn.replaceChildren(icon(ek), h("span", { class: "ecaret", attrs: { "aria-hidden": "true" } }, icon("caret")));
     this.eraserBtn.title = t("eraserButton", { name: t(brushKey(ek)) });
     this.eraserBtn.setAttribute("aria-label", this.eraserBtn.title);
     this.eraserBtn.dataset.eraser = ek;

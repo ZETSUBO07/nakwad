@@ -259,3 +259,25 @@ test("the pen's side button erases while it is held, then the pen draws again; a
   await line(page, 0.3);
   expect((await pixel(page, 0.4, 0.3))[0]!).toBeLessThan(100);
 });
+
+test("the eraser button's ▾ corner opens the eraser menu with one tap; the middle still turns the eraser on", async ({ page }) => {
+  await page.goto("./");
+  await page.locator('[data-action="new-work"]').click();
+  await page.locator('#new-work [data-action="start"]').click();
+  const tb = page.getByTestId("toolbar"), eraser = tb.locator('[data-action="eraser"]');
+  await expect(eraser.locator(".ecaret")).toBeVisible();
+  const b = (await eraser.boundingBox())!;
+  await page.mouse.click(b.x + b.width - 6, b.y + b.height - 6);
+  const menu = page.getByTestId("eraser-menu");
+  await expect(menu).toBeVisible();
+  await expect(eraser).toHaveAttribute("aria-pressed", "false"); // only the menu opened
+  await menu.locator('[data-brush="eraserall"]').click();
+  await expect(eraser).toHaveAttribute("data-eraser", "eraserall");
+  await expect(eraser).toHaveAttribute("aria-pressed", "true");
+  await expect(eraser.locator("svg").first()).toBeVisible();
+  // the middle of the button: back to the brush, then the chosen eraser again
+  await page.mouse.click(b.x + b.width * 0.35, b.y + b.height * 0.35);
+  await expect(eraser).toHaveAttribute("aria-pressed", "false");
+  await page.mouse.click(b.x + b.width * 0.35, b.y + b.height * 0.35);
+  await expect(tb.locator('[data-action="brush"]')).toHaveAttribute("data-brush", "eraserall");
+});
